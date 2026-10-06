@@ -41,6 +41,9 @@
             <!-- #159：更新紀錄改按鈕跳出獨立視窗；#199：接在「檢查更新」之後；#216：同一列——仍置於 UpdatePanel 之外、恆顯，不隨更新區於 dev 裸跑隱藏 -->
             <Button x:Name="ChangeLogBtn" Content="更新紀錄" Style="{StaticResource GhostButton}"
                     VerticalAlignment="Center" ToolTip="檢視各版本的變更"/>
+            <!-- #311：使用手冊——接在「更新紀錄」右側、同為 GhostButton、恆顯；以預設瀏覽器開啟本機版號對應之 README -->
+            <Button x:Name="ManualBtn" Content="使用手冊" Style="{StaticResource GhostButton}"
+                    VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="以瀏覽器開啟本版的使用手冊（GitHub README）"/>
           </StackPanel>
         </StackPanel>
       </Grid>

@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Windows;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -18,11 +17,15 @@ public partial class AboutPage : UserControl
     public AboutPage(UpdateService? updates = null)
     {
         InitializeComponent();
-        var ver = Assembly.GetExecutingAssembly().GetName().Version;
-        VersionText.Text = "版本 v" + (ver is null ? "?" : $"{ver.Major}.{ver.Minor}.{ver.Build}");
+        // #311：版號與使用手冊網址同源（AppVersion）；取不到（null／0.0.0）顯示「?」
+        VersionText.Text = "版本 v" + AppVersion.Display(AppVersion.Current);
         // 更新紀錄改按鈕跳出獨立視窗（#159）——不再常駐佔頁
         ChangeLogBtn.Click += (_, _) =>
             new ChangeLogWindow { Owner = System.Windows.Window.GetWindow(this) }.ShowDialog();
+        // #311：使用手冊（與系統匣同名項共用 UserManual.Open）；開啟失敗以模態提示告知、owner＝所在主視窗
+        ManualBtn.Click += (_, _) => UserManual.Open(msg =>
+            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this), msg, UserManual.DialogTitle,
+                MessageBoxButton.OK, MessageBoxImage.Warning));
 
         _updates = updates;
         if (_updates is null || !_updates.IsSupported)
