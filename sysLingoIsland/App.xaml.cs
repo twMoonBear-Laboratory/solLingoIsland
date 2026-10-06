@@ -87,6 +87,7 @@ public partial class App : System.Windows.Application
         menu.Items.Add("擷取", null, (_, _) => OpenMain(MainTab.Capture)); // 系統匣「Capture」→螢幕截圖頁（epic #145 增量2）
         menu.Items.Add("選項", null, (_, _) => OpenMain(MainTab.Options));
         menu.Items.Add("關於", null, (_, _) => OpenMain(MainTab.About));
+        menu.Items.Add("使用手冊", null, (_, _) => UserManual.Open(msg => ManualNoticeDialog.Show(_main, msg))); // #311：與關於頁鈕共用 Open 與提示框
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("結束", null, (_, _) => ExitApp());
         _tray.ContextMenuStrip = menu;
