@@ -98,6 +98,7 @@ public partial class App : System.Windows.Application
             () => _assessor, () => new NaudioRecorder(), () => _config.PronPassThreshold, _notify);
         _notesPage.ViewRequested += entry => ShowDetail(entry.ToResult());
         _notesPage.EntryEditRequested += (id, text) => _ = EditNoteEntryAsync(id, text); // 複查回饋：筆記編輯→重譯
+        _notesPage.ImportConfirmed += RunNotesImport; // spec#14／#309：確認頁勾選之清單→逐字既有查詢→寫入目前選取夾
         _historyPage = new HistoryPage(_historyStore, () => _speech);
         _historyPage.ViewRequested += entry => ShowDetail(entry.ToResult());
         _historyPage.EntryEditRequested += (id, text) => _ = EditHistoryEntryAsync(id, text); // 複查回饋：歷史編輯→重譯
@@ -406,6 +407,34 @@ public partial class App : System.Windows.Application
     }
 
     private static string Ellipsis(string s, int max) => s.Length <= max ? s : s[..max].TrimEnd() + "…";
+
+    /// <summary>
+    /// 匯入清單之批次執行（spec#14／#309）：確認頁已揭露費用、此處不再問；以 <see cref="AiActionWindow"/> 逐字顯示進度可取消、
+    /// <see cref="NotesImportRunner"/> 接既有 <see cref="QueryService"/>（單字查字義／片語整句翻譯，與字典頁手動查詢同規則）
+    /// 寫入目前選取夾（含子夾）一字一存；結束顯示結果表（成功／略過／失敗逐字原因）、重載筆記頁與字典「加入至」下拉。
+    /// </summary>
+    private void RunNotesImport(string folderId, string folderName, IReadOnlyList<string> words)
+    {
+        if (words.Count == 0) { return; }
+        var query = new QueryService(_config.Model, _config.TimeoutSec, _config.MaxRetries);
+        var runner = new NotesImportRunner(_notesStore, NotesImportRunner.MakeLookup(query));
+        NotesImportOutcome? outcome = null;
+        AiActionWindow.RunAndShow(_main, $"正在匯入 {words.Count} 字到「{folderName}」", async (report, ct) =>
+        {
+            outcome = await runner.RunAsync(words, folderId, NoteDefaults.ColorHex, report, ct);
+            report(NotesImport.ResultText(outcome.Added, outcome.Updated, outcome.Skipped, outcome.Failed, folderName)
+                   + (outcome.Cancelled ? "\n（已取消——已加入的字保留，其餘未查詢。）" : ""));
+            return null; // 費用已於確認頁前置揭露；不顯用量
+        }, autoCloseOnSuccess: false, showCost: false);
+
+        _notesPage?.Reload();
+        _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
+        if (outcome is not null && (outcome.Added > 0 || outcome.Updated > 0))
+        {
+            ToastNotifier.Show($"✓ 已匯入 {outcome.Added} 字到「{folderName}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "")
+                               + (outcome.Failed.Count > 0 ? $"（{outcome.Failed.Count} 字失敗）" : ""));
+        }
+    }
 
     /// <summary>編輯筆記條目原文後重譯（複查回饋）：文字重查→更新該筆三欄（練習分數歸零）、存檔並重載筆記頁。空字串/失敗以 toast。</summary>
     private async Task EditNoteEntryAsync(string id, string text)

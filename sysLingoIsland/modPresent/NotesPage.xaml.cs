@@ -109,6 +109,7 @@ public partial class NotesPage : UserControl
         _data = _store.LoadEnsured();
 
         NewFolderBtn.Click += (_, _) => CreateFolder(parent: null); // 一律建頂層；子資料夾走節點右鍵選單（檔案總管慣例）
+        ImportListBtn.Click += (_, _) => BeginImportList();           // spec#14／#309：選檔→預掃描→確認頁→交 App 逐字查詢加入
         AlphaSortBtn.Click += (_, _) => ToggleSort(NoteSortMode.Alpha);   // 字母（#126：同鈕再點翻方向）
         TimeSortBtn.Click += (_, _) => ToggleSort(NoteSortMode.Time);     // 日期
         ManualSortBtn.Click += (_, _) => ToggleSort(NoteSortMode.Manual); // 自訂順序（拖曳序 正/反）
@@ -132,6 +133,64 @@ public partial class NotesPage : UserControl
     {
         _data = _store.LoadEnsured();
         BuildTree();
+    }
+
+    // ---- 匯入清單（spec#14／#309）----
+
+    /// <summary>
+    /// 確認頁按下「查詢並加入 N 字」後觸發：(目標資料夾 Id, 目標資料夾名, 勾選之原文清單)。
+    /// 本頁只負責選檔→預掃描→確認（確認前零 AI 呼叫）；逐字線上查詢與寫入由 App 以 <see cref="NotesImportRunner"/> 執行後 <see cref="Reload"/>。
+    /// </summary>
+    public event Action<string, string, IReadOnlyList<string>>? ImportConfirmed;
+
+    private void BeginImportList()
+    {
+        var folder = Selected;
+        if (folder is null) { ToastNotifier.Show("請先在左側選一個資料夾，再匯入清單。"); return; } // 守備性：樹恆預選首夾，平時不會到此
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = NotesImport.DialogFilter,
+            Multiselect = false,
+            Title = "選擇英文清單（.txt 每行一字／.csv 取第一欄）",
+        };
+        if (dlg.ShowDialog() != true) { return; }
+        var path = dlg.FileName;
+        string content;
+        try
+        {
+            var len = new System.IO.FileInfo(path).Length;
+            if (len > NotesImport.MaxFileBytes)
+            {
+                System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this),
+                    $"這個檔案有 {len / 1024 / 1024.0:0.#} MB，超過清單檔上限 {NotesImport.MaxFileBytes / 1024 / 1024} MB——它可能不是單字清單。請確認後再選。",
+                    "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+                return;
+            }
+            content = NotesImport.ReadAllText(path);
+        }
+        catch (Exception ex) { ToastNotifier.Show("讀不到這個檔案：" + ex.Message); return; }
+        if (NotesImport.LooksMisdecoded(content))
+        {
+            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this),
+                "這個檔案疑似不是 UTF-8 編碼（讀出了亂碼字元）。請在記事本「另存新檔」時把編碼改為 UTF-8，再匯入一次——不會拿亂碼去查詢。",
+                "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            return;
+        }
+
+        var data = _store.LoadEnsured(); // 以磁碟現況判「已在筆記」（他處可能剛加入）
+        var scan = NotesImport.Scan(NotesImport.ParseLines(content, NotesImport.IsCsv(path)), key => NotesStore.Contains(data, key));
+        if (!scan.IsOk)
+        {
+            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this), scan.Error, "匯入清單",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            return;
+        }
+        var win = new NotesImportWindow(System.IO.Path.GetFileName(path), NotesStore.FolderPath(data, folder.Id) is { Length: > 0 } fp ? fp : folder.Name, scan.Entries)
+        {
+            Owner = System.Windows.Window.GetWindow(this),
+        };
+        if (win.ShowDialog() != true || win.SelectedWords.Count == 0) { return; }
+        ImportConfirmed?.Invoke(folder.Id, folder.Name, win.SelectedWords);
     }
 
     private NoteFolder? Selected => (FolderTree.SelectedItem as TreeViewItem)?.Tag as NoteFolder;
@@ -284,6 +343,7 @@ public partial class NotesPage : UserControl
         EntryPanel.Children.Clear();
         var f = Selected;
         bool any = f is not null && f.Entries.Count > 0;
+        ImportListBtn.IsEnabled = f is not null; // spec#14：無選取夾時停用（tooltip 說明先選夾）
         EmptyHint.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
         ClearPracticeBtn.IsEnabled = any;
         AlphaSortBtn.IsEnabled = any;   // 空夾無可排序（#126）

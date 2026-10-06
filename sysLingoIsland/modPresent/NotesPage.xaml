@@ -44,8 +44,15 @@
         <RowDefinition Height="Auto"/>
         <RowDefinition Height="*"/>
       </Grid.RowDefinitions>
-      <Button x:Name="NewFolderBtn" Grid.Row="0" Content="＋ 新增資料夾" Style="{StaticResource GhostButton}"
-              HorizontalAlignment="Left" Padding="10,4" Margin="0,0,0,6"/>
+      <!-- 左欄頂工具列：建立資料夾＋匯入清單（spec#14／#309：選 .txt/.csv 匯入目前選取夾；無選取夾時停用） -->
+      <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+        <Button x:Name="NewFolderBtn" Content="＋ 新增資料夾" Style="{StaticResource GhostButton}"
+                HorizontalAlignment="Left" Padding="10,4" Margin="0,0,6,0"/>
+        <Button x:Name="ImportListBtn" Content="匯入清單" Style="{StaticResource GhostButton}"
+                AutomationProperties.AutomationId="NotesImportBtn"
+                HorizontalAlignment="Left" Padding="10,4"
+                ToolTip="把 .txt（每行一字）或 .csv（取第一欄）的英文清單匯入目前選取的資料夾——先選左側資料夾再按；匯入前會先列出確認表"/>
+      </WrapPanel>
       <Border Grid.Row="1" Style="{StaticResource Card}">
         <!-- USR：長資料夾名自動分行——停用水平捲軸使列寬受欄寬約束（配合 MakeItem 列拉伸＋名稱 TextWrapping） -->
         <TreeView x:Name="FolderTree" BorderThickness="0" Background="Transparent" AllowDrop="True" Margin="2"
