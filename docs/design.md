@@ -736,10 +736,10 @@ ADM -.->|"setWi自訂Usr啟動結束常駐"| SYS
 > 歷次修訂紀錄（逐條「日期：改了什麼、為什麼、誰拍板」）＋決策考量。不放 spec／機制／檢討（三者各歸其位）。
 
 * **2026-10-06：五處舊 org 名改齊 `twMoonBear-Laboratory`（含 Velopack 更新來源）（Issue #310；sprint #308〔新增匯入筆記清單功能〕；來源 #307、併 #305；USR 拍板全自動授權；型別 chore、不進位）**。起因：repo 於 2026-10-06 自 `twStellarWhale-Ocean` 搬至 `twMoonBear-Laboratory`（更早曾用 `twStellerWhale-Ocean2`），受版控活文仍寫死兩代舊名，其中更新來源靠 GitHub 轉址運作、轉址非永久保證。
-  * **改齊五處**：`LICENSE`（Required Notice 版權主體與連結）、`README.md`（Releases 下載連結）、本檔 ＜II.A.(B).4＞ 開發 REPO 一行（另「（私有）」改「（公開）」——repo 現為 PUBLIC，#305）、`UpdateService.RepoUrl`（Velopack `GithubSource`）、[modHmi關於分頁] `GitHubLink`。
-  * **防再漂移**：單元測試鎖住 `RepoUrl` 指現行 org、關於頁連結與 `RepoUrl` 同值。
+  * **改齊五處**：`LICENSE`（Required Notice 改為 `Copyright 2026 twMoonBear-Laboratory (https://github.com/twMoonBear-Laboratory)`）、`README.md`（Releases 下載連結）、本檔 ＜II.A.(B).4＞ 開發 REPO 一行（另「（私有）」改「（公開）」——repo 現為 PUBLIC，#305）、`UpdateService.RepoUrl`（Velopack `GithubSource`）、[modHmi關於分頁] `GitHubLink`。
+  * **防再漂移**：單元測試鎖住 `RepoUrl` 指現行 org，並以文字讀取 `AboutPage.xaml` 比對其 `GitHubLink` 之 `NavigateUri` 與 `RepoUrl` 同值（不需 STA 載入 XAML）。
   * **生效時點**：已安裝端之更新來源隨本期 4.16.0 發車才換新；發車前舊版仍靠轉址運作。
-  * **範圍外（明記不做）**：`CHANGELOG.md` 與歷史 ISSUE 紀錄中之舊名（記的是當時）、本機 `origin` remote（不入版控）。
+  * **範圍外（明記不做）**：歷史 ISSUE 紀錄中之舊名（記的是當時；`CHANGELOG.md` 現無舊名，日後亦不回改）、本機 `origin` remote（不入版控）。
 
 * **2026-10-06：筆記頁匯入英文清單——txt/csv 預掃描彙總後批次線上查詢加入筆記（Issue #309；sprint #308〔新增匯入筆記清單功能〕；來源 #306；USR 拍板全自動授權；版號級距 minor）**。起因：USR 手上常有整份生詞清單，現行只能逐字到字典視窗打字查、再按加入。改法逐條如下。
   * **新增 `spec#14`**（接續 #1–#13）；＜II.A.(A).3＞ 前言之 spec 數同批追平為 14 條；由 orgSop#0.3 承接，新增 teamSop#0.3.6 與 prsnSop#0.3.6.1.x。
