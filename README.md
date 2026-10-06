@@ -28,7 +28,7 @@
 
 ## 快速開始
 
-1. **安裝程式**：自 [GitHub Releases](https://github.com/twStellarWhale-Ocean/solLingoIsland/releases/latest) 下載 `LingoIsland-win-Setup.exe` 執行（安裝至使用者目錄、不需系統管理員權限；之後**新版會自動更新**）。不想安裝可改下載 `Portable.zip` 解壓到任意資料夾。
+1. **安裝程式**：自 [GitHub Releases](https://github.com/twMoonBear-Laboratory/solLingoIsland/releases/latest) 下載 `LingoIsland-win-Setup.exe` 執行（安裝至使用者目錄、不需系統管理員權限；之後**新版會自動更新**）。不想安裝可改下載 `Portable.zip` 解壓到任意資料夾。
 
 > **（選用）認得這個發行者**——做完之後，安裝與執行時 Windows 會顯示發行者名稱，不再是「未知的發行者」。
 >
