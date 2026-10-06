@@ -22,10 +22,8 @@ public partial class AboutPage : UserControl
         // 更新紀錄改按鈕跳出獨立視窗（#159）——不再常駐佔頁
         ChangeLogBtn.Click += (_, _) =>
             new ChangeLogWindow { Owner = System.Windows.Window.GetWindow(this) }.ShowDialog();
-        // #311：使用手冊（與系統匣同名項共用 UserManual.Open）；開啟失敗以模態提示告知、owner＝所在主視窗
-        ManualBtn.Click += (_, _) => UserManual.Open(msg =>
-            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this), msg, UserManual.DialogTitle,
-                MessageBoxButton.OK, MessageBoxImage.Warning));
+        // #311：使用手冊（與系統匣同名項共用 UserManual.Open）；開啟失敗／離線以共用提示框告知（owner 規則見 ManualNoticeDialog）
+        ManualBtn.Click += (_, _) => UserManual.Open(msg => ManualNoticeDialog.Show(System.Windows.Window.GetWindow(this), msg));
 
         _updates = updates;
         if (_updates is null || !_updates.IsSupported)

@@ -146,11 +146,32 @@ public class UserManualTests
     }
 
     [Fact]
-    public void Open_LaunchFailsWhileOffline_NotifiesOnlyOnce_WithFailureMessage()
+    public void Open_LaunchFailsWhileOffline_NotifiesEachConditionOnce_OfflineFirst()
     {
         var notified = new List<string>();
         Assert.False(UserManual.Open(notified.Add, _ => throw new Win32Exception(), new Version(4, 17, 0, 0), () => false));
-        Assert.Contains("無法開啟瀏覽器", Assert.Single(notified));
+        Assert.Equal(2, notified.Count);
+        Assert.Contains("沒有網路連線", notified[0]);
+        Assert.Contains("無法開啟瀏覽器", notified[1]);
+    }
+
+    /// <summary>離線提示須在開瀏覽器「之前」（模態、按確定後才開），免被隨後搶前景之瀏覽器蓋住。</summary>
+    [Fact]
+    public void Open_Offline_NotifiesBeforeLaunching()
+    {
+        var events = new List<string>();
+        UserManual.Open(_ => events.Add("notify"), _ => events.Add("launch"), new Version(4, 17, 0, 0), () => false);
+        Assert.Equal(new[] { "notify", "launch" }, events);
+    }
+
+    [Theory]
+    [InlineData(true, true, false, NoticeOwner.MainWindow)]
+    [InlineData(true, true, true, NoticeOwner.TopmostHelper)]   // 最小化：被擁有視窗會隨之隱藏
+    [InlineData(true, false, false, NoticeOwner.TopmostHelper)] // 主視窗隱藏
+    [InlineData(false, false, false, NoticeOwner.TopmostHelper)] // 主視窗未建立
+    public void ChooseOwner_OnlyVisibleNonMinimizedMainIsOwner(bool hasMain, bool visible, bool minimized, NoticeOwner expected)
+    {
+        Assert.Equal(expected, UserManual.ChooseOwner(hasMain, visible, minimized));
     }
 
     [Fact]
@@ -215,8 +236,10 @@ public class UserManualTests
     [Fact]
     public void AboutPageCode_WiresManualButtonToUserManual_AndUsesSharedVersion()
     {
-        var cs = ReadRepoFile("sysLingoIsland", "modPresent", "AboutPage.xaml.cs");
-        Assert.Matches(new Regex("ManualBtn\\.Click\\s*\\+=[^;]*UserManual\\.Open\\(", RegexOptions.Singleline), cs);
+        var cs = StripComments(ReadRepoFile("sysLingoIsland", "modPresent", "AboutPage.xaml.cs"));
+        // 提示器須接共用提示框（不得換成靜默吞掉之 lambda）、且只傳提示器一參數（不傳版號／開啟者＝與系統匣同網址同開法）
+        Assert.Matches(new Regex(
+            "ManualBtn\\.Click\\s*\\+=\\s*\\(_, _\\)\\s*=>\\s*UserManual\\.Open\\(msg\\s*=>\\s*ManualNoticeDialog\\.Show\\([^;]*,\\s*msg\\)\\);"), cs);
         Assert.Contains("AppVersion.Display(AppVersion.Current)", cs); // 版號顯示與手冊網址同源
         Assert.DoesNotContain("GetExecutingAssembly", cs);
     }
@@ -224,16 +247,32 @@ public class UserManualTests
     [Fact]
     public void TrayMenu_HasManualItem_AfterAbout_BeforeExit_WiredToUserManual()
     {
-        var cs = ReadRepoFile("sysLingoIsland", "App.xaml.cs");
-        var item = Regex.Match(cs, "menu\\.Items\\.Add\\(\"使用手冊\",[^\\n]*UserManual\\.Open\\(");
-        Assert.True(item.Success, "App.xaml.cs 系統匣選單找不到「使用手冊」項接 UserManual.Open");
+        var cs = StripComments(ReadRepoFile("sysLingoIsland", "App.xaml.cs"));
+        var item = Regex.Match(cs,
+            "menu\\.Items\\.Add\\(\"使用手冊\", null, \\(_, _\\) => UserManual\\.Open\\(msg => ManualNoticeDialog\\.Show\\(_main, msg\\)\\)\\);");
+        Assert.True(item.Success, "App.xaml.cs 系統匣「使用手冊」項須接 UserManual.Open＋共用提示框、且不傳版號／開啟者");
         var about = cs.IndexOf("menu.Items.Add(\"關於\"", StringComparison.Ordinal);
         var exit = cs.IndexOf("menu.Items.Add(\"結束\"", StringComparison.Ordinal);
         Assert.True(about > 0 && exit > 0, "找不到「關於」或「結束」項");
         Assert.True(about < item.Index && item.Index < exit, "「使用手冊」應位於「關於」之後、「結束」之前");
     }
 
+    /// <summary>提示框本體：owner 走 ChooseOwner、不用 DefaultDesktopOnly、真的呼叫 MessageBox.Show（非靜默）。</summary>
+    [Fact]
+    public void ManualNoticeDialog_UsesChooseOwner_AndShowsMessageBox()
+    {
+        var cs = StripComments(ReadRepoFile("sysLingoIsland", "modPresent", "ManualNoticeDialog.cs"));
+        Assert.Contains("UserManual.ChooseOwner(", cs);
+        Assert.Equal(2, Regex.Matches(cs, "MessageBox\\.Show\\(").Count);
+        Assert.DoesNotContain("DefaultDesktopOnly", cs);
+        Assert.Contains("Topmost = true", cs);
+    }
+
     // ---------- helpers ----------
+
+    /// <summary>剝除 // 行註解與 /* */ 區塊註解（結構斷言不得被註解中之字樣騙過）。</summary>
+    private static string StripComments(string code) =>
+        Regex.Replace(Regex.Replace(code, "/\\*.*?\\*/", "", RegexOptions.Singleline), "//[^\\n]*", "");
 
     private static string FindRepoRoot()
     {

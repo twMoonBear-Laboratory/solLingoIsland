@@ -64,8 +64,9 @@ public static class UserManual
     }
 
     /// <summary>
-    /// 兩入口之單一進入點：以本機版號組網址並開啟；開啟失敗或判定離線時以 <paramref name="notify"/> 告知恰一次
-    /// （呼叫端以模態提示呈現）。離線仍照常交瀏覽器開啟（網路可能隨即恢復、可重新整理）。
+    /// 兩入口之單一進入點：以本機版號組網址並開啟。**開啟前**判定離線者先以 <paramref name="notify"/> 告知
+    /// （模態、使用者按確定後才開瀏覽器——免提示被隨後搶前景之瀏覽器蓋住），之後仍照常開啟（網路可能隨即恢復、可重新整理）；
+    /// 開啟失敗再以 <paramref name="notify"/> 告知。每種狀況各告知一次，皆含完整網址。
     /// </summary>
     /// <param name="isOnline">網路判定；null＝<see cref="NetworkInterface.GetIsNetworkAvailable"/>（本機判定、不連網）。</param>
     /// <returns>是否成功交出開啟。</returns>
@@ -73,15 +74,15 @@ public static class UserManual
         Func<bool>? isOnline = null)
     {
         var url = BuildUrl(version ?? AppVersion.Current);
+        if (!IsOnlineSafe(isOnline ?? NetworkInterface.GetIsNetworkAvailable))
+        {
+            notify(AppStatusText.ManualOffline(url));
+        }
         var error = TryOpen(url, launcher);
         if (error is not null)
         {
             notify(error);
             return false;
-        }
-        if (!IsOnlineSafe(isOnline ?? NetworkInterface.GetIsNetworkAvailable))
-        {
-            notify(AppStatusText.ManualOffline(url));
         }
         return true;
     }
@@ -108,6 +109,22 @@ public static class UserManual
             File.AppendAllText(log, url + Environment.NewLine);
             return;
         }
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        using var _ = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
+
+    /// <summary>
+    /// 提示框之 owner 選擇（純函式、可單元測試）：主視窗存在、可見且非最小化 → 以主視窗為 owner；
+    /// 否則（含最小化——被擁有視窗會隨 owner 隱藏而模態卡住 UI）→ 以暫時之置頂隱形視窗為 owner，免被遊戲或瀏覽器擋住。
+    /// </summary>
+    public static NoticeOwner ChooseOwner(bool hasMain, bool isVisible, bool isMinimized) =>
+        hasMain && isVisible && !isMinimized ? NoticeOwner.MainWindow : NoticeOwner.TopmostHelper;
+}
+
+/// <summary>使用手冊提示框之 owner 種類（#311）。</summary>
+public enum NoticeOwner
+{
+    /// <summary>以可見之主視窗為 owner。</summary>
+    MainWindow,
+    /// <summary>以暫時之置頂隱形視窗為 owner（提示關閉即關閉）。</summary>
+    TopmostHelper,
 }

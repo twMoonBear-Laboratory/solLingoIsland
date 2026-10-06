@@ -7,8 +7,9 @@
     (2) 該鈕與「更新紀錄」鈕（ChangeLogBtn）同列（垂直中心差 ≤ 半個鈕高）且位於其右。
     (3) 以 InvokePattern 實按後，攔截檔恰新增一筆，內容＝{RepoUrl}/blob/v{VERSION}/README.md
         ——RepoUrl 自 sysLingoIsland/UpdateService.cs 原始碼讀值、VERSION 自根檔讀值，不硬編第二份。
+    (3b) 成功路徑不跳任何提示框。
     (4) 按下後 App 仍存活、主視窗仍在（開啟路徑不致崩潰）。
-    (5) 案二：測試縫指向既存資料夾（寫檔必擲例外＝真實之開啟失敗分支），實按後標題「LingoIsland 使用手冊」之提示框出現、
+    (5) 案二：測試縫指向既存資料夾（寫檔必擲例外＝以測試縫模擬開啟失敗，走與 Process.Start 擲例外同一條提示分支），實按後標題「LingoIsland 使用手冊」之提示框出現、
         文字含「無法開啟瀏覽器」與完整網址；按確定後 App 存活。
 
   不開瀏覽器：以測試縫環境變數 LINGOISLAND_MANUAL_LAUNCH_LOG 啟動受測 app，「使用手冊」改把網址附寫該檔（design ＜II.C.(A).4＞ 使用手冊入口契約）。
@@ -19,9 +20,12 @@
   %APPDATA% 起手備份、finally 還原（啟動 app 會改寫 ui-state 等檔）。全程 0 次 OpenAI 呼叫。
 #>
 
+# 注意：本腳本起手會**關閉所有執行中之 LingoIsland**（含你正在用的那一個），%APPDATA%\LingoIsland 起手備份、結束還原。
+# 手冊圖 docs/manual-assets/about-manual-button.png 只在帶 -UpdateManualAsset 時覆寫（平時只寫 OutDir）。
 param(
   [string]$ExePath = "",
-  [string]$OutDir  = ""
+  [string]$OutDir  = "",
+  [switch]$UpdateManualAsset
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -57,6 +61,8 @@ Write-Host "# II.參考準備 ================================" -ForegroundColor
   Write-Host "* 期望網址 = $expected"
   if (-not (Test-Path $ExePath)) { Write-Host "* [錯誤] 找不到建置產物：$ExePath（請先 dotnet build -c Release）" -ForegroundColor Red; exit 1 }
   if (-not (Test-Path $OutDir))  { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
+  # 本機離線時「使用手冊」會先跳離線提示（設計如此），案一之「成功不跳框」無從判定——據實中止
+  if (-not [System.Net.NetworkInformation.NetworkInterface]::GetIsNetworkAvailable()) { Write-Host "* [錯誤] 本機判定離線——案一會先跳離線提示，本輪無法判定" -ForegroundColor Red; exit 1 }
   #endregion
 
   #region B.型別準備（共用定義） --------------------------------
@@ -132,8 +138,10 @@ try {
   if ([Win32Ui]::PidAtPoint($cx, $cy) -ne [uint32]$app.ProcessId) { throw "「使用手冊」鈕座標被他窗覆蓋——本輪無法判定（請關閉遮擋視窗後重跑）" }
   if ($fails.Count -eq 0) { Write-Host "* [OK] 鈕在、文字正確、與更新紀錄同列居右" -ForegroundColor Green }
   Save-WindowShot -Hwnd $hwnd -Path (Join-Path $OutDir "01-about-manual-button.png")
-  Copy-Item (Join-Path $OutDir "01-about-manual-button.png") $manualPng -Force
-  Write-Host "* 手冊圖 → $manualPng"
+  if ($UpdateManualAsset) {
+    Copy-Item (Join-Path $OutDir "01-about-manual-button.png") $manualPng -Force
+    Write-Host "* 手冊圖 → $manualPng"
+  } else { Write-Host "* 手冊圖未覆寫（未帶 -UpdateManualAsset）" }
   #endregion
 
   #region D.訴求3–4：實按→攔截網址、App 存活 --------------------------------
@@ -147,6 +155,13 @@ try {
   if ($new.Count -ne 1) { $fails += "訴求3：實按後攔截檔新增 $($new.Count) 筆（應為 1）" }
   elseif ($new[0].Trim() -ne $expected) { $fails += "訴求3：開出網址「$($new[0].Trim())」≠ 期望「$expected」" }
   else { Write-Host "* [OK] 開出網址＝$expected" -ForegroundColor Green }
+  # 成功路徑不得跳任何提示框（防退化成「成功也跳框」）
+  $CT = [System.Windows.Automation.ControlType]; $TS = [System.Windows.Automation.TreeScope]
+  $winCond = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Window)
+  Start-Sleep -Milliseconds 1500
+  $stray = @(@($root.FindAll($TS::Descendants, $winCond)) + @($AE::RootElement.FindAll($TS::Children, $winCond)) |
+    Where-Object { $_.Current.Name -eq "LingoIsland 使用手冊" -and $_.Current.ProcessId -eq $app.ProcessId })
+  if ($stray.Count -gt 0) { $fails += "訴求3：成功路徑卻跳出「LingoIsland 使用手冊」提示框" } else { Write-Host "* [OK] 成功路徑未跳提示框" -ForegroundColor Green }
 
   Start-Sleep -Milliseconds 800
   $alive = Get-Process -Id $app.ProcessId -ErrorAction SilentlyContinue
@@ -174,8 +189,6 @@ try {
   $manualBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
   # 模態提示：owned 視窗掛主視窗之下（Descendants），兩處都掃
-  $CT = [System.Windows.Automation.ControlType]; $TS = [System.Windows.Automation.TreeScope]
-  $winCond = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Window)
   $dlg = $null; $deadline = (Get-Date).AddSeconds(10)
   while ($null -eq $dlg -and (Get-Date) -lt $deadline) {
     foreach ($w in @($root.FindAll($TS::Descendants, $winCond)) + @($AE::RootElement.FindAll($TS::Children, $winCond))) {

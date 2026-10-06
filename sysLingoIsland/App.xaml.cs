@@ -87,7 +87,7 @@ public partial class App : System.Windows.Application
         menu.Items.Add("擷取", null, (_, _) => OpenMain(MainTab.Capture)); // 系統匣「Capture」→螢幕截圖頁（epic #145 增量2）
         menu.Items.Add("選項", null, (_, _) => OpenMain(MainTab.Options));
         menu.Items.Add("關於", null, (_, _) => OpenMain(MainTab.About));
-        menu.Items.Add("使用手冊", null, (_, _) => UserManual.Open(ShowManualOpenFailed)); // #311：與關於頁鈕共用
+        menu.Items.Add("使用手冊", null, (_, _) => UserManual.Open(msg => ManualNoticeDialog.Show(_main, msg))); // #311：與關於頁鈕共用 Open 與提示框
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("結束", null, (_, _) => ExitApp());
         _tray.ContextMenuStrip = menu;
@@ -559,21 +559,6 @@ public partial class App : System.Windows.Application
     private void OpenMain(MainTab tab)
     {
         _main?.ShowTab(tab);
-    }
-
-    /// <summary>
-    /// 系統匣「使用手冊」開啟失敗之提示（#311）：主視窗可見即以其為 owner（比照既有 MessageBox.Show(_main, …)）；
-    /// 否則不設 owner、以 DefaultDesktopOnly 置頂顯示，免被遊戲或其他視窗擋住。
-    /// </summary>
-    private void ShowManualOpenFailed(string message)
-    {
-        if (_main is { IsVisible: true } && _main.WindowState != WindowState.Minimized)
-        {
-            System.Windows.MessageBox.Show(_main, message, UserManual.DialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        System.Windows.MessageBox.Show(message, UserManual.DialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning,
-            MessageBoxResult.OK, System.Windows.MessageBoxOptions.DefaultDesktopOnly);
     }
 
     /// <summary>
