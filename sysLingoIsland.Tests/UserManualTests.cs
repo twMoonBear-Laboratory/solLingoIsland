@@ -270,7 +270,8 @@ public class UserManualTests
 
     // ---------- helpers ----------
 
-    /// <summary>剝除 // 行註解與 /* */ 區塊註解（結構斷言不得被註解中之字樣騙過）。</summary>
+    /// <summary>剝除 // 行註解與 /* */ 區塊註解（結構斷言不得被註解中之字樣騙過）。
+    /// 限制：字串字面值內之 <c>//</c>（如 <c>https://</c>）會被一併剝除——受測接線行不得含網址字面值。</summary>
     private static string StripComments(string code) =>
         Regex.Replace(Regex.Replace(code, "/\\*.*?\\*/", "", RegexOptions.Singleline), "//[^\\n]*", "");
 

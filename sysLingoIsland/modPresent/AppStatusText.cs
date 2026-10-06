@@ -54,9 +54,9 @@ public static class AppStatusText
         "無法開啟瀏覽器顯示使用手冊。\n\n請將下列網址貼到瀏覽器開啟：\n" + url +
         "\n\n（按 Ctrl+C 可複製本訊息，內含上列網址。）";
 
-    /// <summary>使用手冊開啟時判定離線（#311）：瀏覽器已照常開啟，告知可能載入不了並附網址。</summary>
+    /// <summary>使用手冊開啟前判定離線（#311）：先告知可能載入不了並附網址，按確定後才開瀏覽器。</summary>
     public static string ManualOffline(string url) =>
-        "目前沒有網路連線，瀏覽器可能無法載入使用手冊。\n連上網路後在瀏覽器重新整理即可。\n\n網址：\n" + url +
+        "目前沒有網路連線，瀏覽器可能無法載入使用手冊。\n按「確定」後仍會開啟瀏覽器；連上網路後在瀏覽器重新整理即可。\n\n網址：\n" + url +
         "\n\n（按 Ctrl+C 可複製本訊息，內含上列網址。）";
 
     /// <summary>失敗結果 → 對應訊息（#122）。</summary>

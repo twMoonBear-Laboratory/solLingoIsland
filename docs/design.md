@@ -750,6 +750,7 @@ ADM -.->|"setWi自訂Usr啟動結束常駐"| SYS
   * **採用依據**：測試縫以環境變數攔截外部開啟——依本檔既有 `LINGOISLAND_UPDATE_URL` 之先例；退路取 `main`——依 GitHub 預設分支即最新文件之慣例；開瀏覽器以 `UseShellExecute=true`——依 .NET Core 起 `Process.Start(url)` 須明示 shell 執行之官方說明與本檔既有 GitHub 連結作法。
   * **版號**：`VERSION` 4.16.0 → **4.17.0**（feat→minor；4.16.0 已由 #309 佔用、未發車，依「1 PR＝1 增量＝1 版號」另進），為本件程式段交付項，`CHANGELOG.md` 補 `[4.17.0]` 段。
   * **範圍外（明記不做）**：F1 快捷鍵開說明（Windows 慣例，惟本 app 為遊戲中常駐、全域熱鍵與遊戲按鍵衝突風險高，且主視窗多半不在前景，不做）、外網可達性預檢（只判本機有無網路介面）、tag 存在預檢（理由見契約）、手冊章節深連結、內嵌顯示（#291 方案 B 已否決）、隨安裝檔附手冊（方案 C 已否決）、既有 GitHub 連結之失敗提示。
+  * **已知限制（S3P 找碴第 2 輪留帳）**：①置頂隱形暫時視窗為 owner 之分支（主視窗最小化時由系統匣觸發）僅有結構斷言與純函式 `ChooseOwner` 測試，未經自動化實走；②提示框模態期間系統匣選單仍可再點，連點會疊出多個提示（無害、逐一按確定即可），本版不加重入旗標。
   * **已知限制**：尚未發車之版號（dev 建置自 `VERSION` 取得之未打 tag 版號）開出之頁為 GitHub 404——僅開發者情境；已發車之版本皆有對應 tag。
 * **2026-10-06：五處舊 org 名改齊 `twMoonBear-Laboratory`（含 Velopack 更新來源）（Issue #310；sprint #308〔新增匯入筆記清單功能〕；來源 #307、併 #305；USR 拍板全自動授權；型別 chore、不進位）**。起因：repo 於 2026-10-06 自 `twStellarWhale-Ocean` 搬至 `twMoonBear-Laboratory`（更早曾用 `twStellerWhale-Ocean2`），受版控活文仍寫死兩代舊名，其中更新來源靠 GitHub 轉址運作、轉址非永久保證。
   * **改齊五處**：`LICENSE`（Required Notice 改為 `Copyright 2026 twMoonBear-Laboratory (https://github.com/twMoonBear-Laboratory)`）、`README.md`（Releases 下載連結）、本檔 ＜II.A.(B).4＞ 開發 REPO 一行（另「（私有）」改「（公開）」——repo 現為 PUBLIC，#305）、`UpdateService.RepoUrl`（Velopack `GithubSource`）、[modHmi關於分頁] `GitHubLink`。
