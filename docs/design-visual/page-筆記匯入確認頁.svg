@@ -57,8 +57,8 @@
   <text x="124" y="238" font-size="12" fill="#333">cherry</text>
   <text x="400" y="238" font-size="11" fill="#4A7A4A">新字</text>
   <!-- 列 4：檔內重複（預設不勾） -->
-  <rect x="86" y="257" width="12" height="12" rx="2" fill="#FFFFFF" stroke="#999"/>
-  <text x="124" y="268" font-size="12" fill="#777">Cherry</text>
+  <rect x="86" y="257" width="12" height="12" rx="2" fill="#EEEEEE" stroke="#CCCCCC"/>
+  <text x="124" y="268" font-size="12" fill="#AAAAAA">Cherry</text>
   <text x="400" y="268" font-size="11" fill="#A06A20">檔內重複（只留第一筆）</text>
   <!-- 列 5：新字（片語） -->
   <rect x="86" y="287" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
@@ -69,7 +69,7 @@
   <text x="124" y="336" font-size="11" fill="#AAA">（可捲動；逐列可改選）</text>
 
   <!-- 費用揭露 -->
-  <text x="76" y="374" font-size="11" fill="#8A5A6D">共 <tspan font-weight="600" fill="#5C3346">3</tspan> 次 AI 查詢，將使用你的 OpenAI 金鑰；已在筆記之字不會重複建立（勾選者只更新內容）。</text>
+  <text x="76" y="374" font-size="11" fill="#8A5A6D">共 <tspan font-weight="600" fill="#5C3346">3</tspan> 次 AI 查詢，將使用你的 OpenAI 金鑰；已在筆記之字不會重複建立。</text>
 
   <!-- 底部按鈕 -->
   <rect x="340" y="392" width="140" height="30" rx="15" fill="#D64D8A"/>
