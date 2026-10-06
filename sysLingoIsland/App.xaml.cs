@@ -416,13 +416,22 @@ public partial class App : System.Windows.Application
     private void RunNotesImport(string folderId, string folderName, IReadOnlyList<string> words)
     {
         if (words.Count == 0) { return; }
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
+        {
+            // 起跑前預檢（與字典頁「金鑰未設定時顯示明確錯誤與設定指引」同基準）：每個字都會失敗，不讓使用者等逾時
+            System.Windows.MessageBox.Show(_main, "尚未設定 OPENAI_API_KEY，無法線上查詢。請先在系統匣選單「設定…」或環境變數設定金鑰，再匯入一次（清單檔不會有任何變動）。",
+                "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
         var query = new QueryService(_config.Model, _config.TimeoutSec, _config.MaxRetries);
         var runner = new NotesImportRunner(_notesStore, NotesImportRunner.MakeLookup(query));
         NotesImportOutcome? outcome = null;
         AiActionWindow.RunAndShow(_main, $"正在匯入 {words.Count} 字到「{folderName}」", async (report, ct) =>
         {
             outcome = await runner.RunAsync(words, folderId, NoteDefaults.ColorHex, report, ct);
-            report(NotesImport.ResultText(outcome.Added, outcome.Updated, outcome.Skipped, outcome.Failed, folderName)
+            var shownFolder = outcome.TargetFolderMissing ? NotesStore.DefaultFolderName : folderName;
+            report(NotesImport.ResultText(outcome.Added, outcome.Updated, outcome.Skipped, outcome.Failed, shownFolder, outcome.AddedWords)
+                   + (outcome.TargetFolderMissing ? $"\n（目標資料夾「{folderName}」在匯入途中已不存在，已改加到第一個資料夾「{NotesStore.DefaultFolderName}」。）" : "")
                    + (outcome.Cancelled ? "\n（已取消——已加入的字保留，其餘未查詢。）" : ""));
             return null; // 費用已於確認頁前置揭露；不顯用量
         }, autoCloseOnSuccess: false, showCost: false);
@@ -431,7 +440,8 @@ public partial class App : System.Windows.Application
         _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
         if (outcome is not null && (outcome.Added > 0 || outcome.Updated > 0))
         {
-            ToastNotifier.Show($"✓ 已匯入 {outcome.Added} 字到「{folderName}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "")
+            var shownFolder = outcome.TargetFolderMissing ? NotesStore.DefaultFolderName : folderName;
+            ToastNotifier.Show($"✓ 已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "")
                                + (outcome.Failed.Count > 0 ? $"（{outcome.Failed.Count} 字失敗）" : ""));
         }
     }

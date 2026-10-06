@@ -200,4 +200,47 @@ public class NotesImportTests
     [InlineData("", false)]
     public void IsSingleWord_SplitsQueryPath(string text, bool single)
         => Assert.Equal(single, NotesImport.IsSingleWord(text));
+
+    [Theory]
+    [InlineData("1. apple", "apple")]
+    [InlineData("12) banana", "banana")]
+    [InlineData("(3) cherry", "cherry")]
+    [InlineData("4、durian", "durian")]
+    [InlineData("2024", "2024")]            // 純數字行不剝
+    [InlineData("apple", "apple")]
+    [InlineData("3D printer", "3D printer")] // 數字後無分隔符不剝
+    public void StripLeadingNumber_RemovesListNumbering(string line, string expected)
+        => Assert.Equal(expected, NotesImport.StripLeadingNumber(line));
+
+    [Fact]
+    public void ParseLines_Txt_TabSeparated_TakesFirstField_AndStripsNumbering()
+    {
+        var lines = NotesImport.ParseLines("1. apple\t蘋果\n2. take it easy\t放輕鬆\n", csv: false); // Anki 匯出常規
+        Assert.Equal(new[] { "apple", "take it easy" }, lines);
+    }
+
+    [Fact]
+    public void Scan_OverMaxLines_RejectedEvenIfUniqueBelowLimit()
+    {
+        var many = Enumerable.Repeat("apple", NotesImport.MaxLines + 1); // 數萬行重複字：unique=1 但行數爆
+        var scan = NotesImport.Scan(many, _ => false);
+        Assert.False(scan.IsOk);
+        Assert.Contains($"{NotesImport.MaxLines}", scan.Error);
+    }
+
+    [Fact]
+    public void Scan_ExistingFolder_ShownInStatus()
+    {
+        var scan = NotesImport.Scan(new[] { "apple", "banana" }, key => key == "banana" ? "My Notes › Unit 3" : null);
+        Assert.Equal(NotesImportStatus.New, scan.Entries[0].Status);
+        Assert.Equal("My Notes › Unit 3", scan.Entries[1].ExistingFolder);
+        Assert.Contains("已在筆記「My Notes › Unit 3」", NotesImport.StatusText(scan.Entries[1]));
+    }
+
+    [Fact]
+    public void ResultText_ListsAddedWords_WhenProvided()
+    {
+        var text = NotesImport.ResultText(2, 0, Array.Empty<string>(), Array.Empty<(string, string)>(), "Unit 3", new[] { "apple", "cherry" });
+        Assert.Contains("已加入 2 字到「Unit 3」（apple、cherry）", text);
+    }
 }

@@ -264,6 +264,10 @@ public sealed class NotesStore
     public static NoteFolder? FindFolder(NotesData d, string id) =>
         AllFolders(d).FirstOrDefault(f => f.Id == id);
 
+    /// <summary>某去重鍵所在之資料夾（spec#14 確認頁顯示「已在筆記「夾名」」）；不在回 null。</summary>
+    public static NoteFolder? FolderOfKey(NotesData d, string key) =>
+        string.IsNullOrEmpty(key) ? null : AllFolders(d).FirstOrDefault(f => f.Entries.Any(e => e.Key == key));
+
     /// <summary>某去重鍵是否已存在於樹中任一資料夾。</summary>
     public static bool Contains(NotesData d, string key) =>
         !string.IsNullOrEmpty(key) && AllFolders(d).Any(f => f.Entries.Any(e => e.Key == key));

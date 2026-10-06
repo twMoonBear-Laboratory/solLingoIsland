@@ -50,6 +50,8 @@ public class NotesImportRunnerTests
             Assert.False(outcome.Cancelled);
             Assert.Equal(new[] { "apple", "cherry" }, calls);          // 勾選數＝查詢次數
             Assert.Equal(new[] { "查詢中 1/2：apple", "查詢中 2/2：cherry" }, reports);
+            Assert.Equal(new[] { "apple", "cherry" }, outcome.AddedWords);
+            Assert.False(outcome.TargetFolderMissing);
 
             var d = new NotesStore(path).Load();                        // 真檔讀回
             var sub = NotesStore.FindFolder(d, subId)!;
@@ -162,7 +164,8 @@ public class NotesImportRunnerTests
         {
             var (store, subId, topId) = Seed(path);
             var runner = new NotesImportRunner(store, Ok());
-            await runner.RunAsync(new[] { "apple" }, "no-such-folder-id", "", null, CancellationToken.None);
+            var outcome = await runner.RunAsync(new[] { "apple" }, "no-such-folder-id", "", null, CancellationToken.None);
+            Assert.True(outcome.TargetFolderMissing);   // 結果表據此如實改口、不寫原夾名
             var d = new NotesStore(path).Load();
             Assert.Contains(d.Folders[0].Entries, e => e.Original == "apple");
             Assert.Equal(topId, d.Folders[0].Id);
@@ -225,8 +228,8 @@ public class NotesImportRunnerTests
 
             Assert.Equal(NotesImportRunner.SystemicFailureStreak, calls);          // 只真的查了 3 次
             Assert.Equal(10, outcome.Failed.Count);                                 // 其餘如實計失敗
-            Assert.Equal(3, outcome.Failed.Count(f => f.Reason.Contains("未設定")));
-            Assert.Equal(7, outcome.Failed.Count(f => f.Reason == NotesImportRunner.NotQueriedReason));
+            Assert.Equal(3, outcome.Failed.Count(f => !f.Reason.StartsWith(NotesImportRunner.NotQueriedReason))); // 真的查過的 3 字帶原始錯誤
+            Assert.Equal(7, outcome.Failed.Count(f => f.Reason.StartsWith(NotesImportRunner.NotQueriedReason) && f.Reason.Contains("未設定"))); // 帶首字實際錯誤
             Assert.Equal(0, outcome.Added);
         }
         finally { File.Delete(path); }
@@ -245,7 +248,7 @@ public class NotesImportRunnerTests
             var outcome = await runner.RunAsync(new[] { "ok", "a", "b", "c", "d", "e" }, subId, "", null, CancellationToken.None);
             Assert.Equal(1, outcome.Added);
             Assert.Equal(5, outcome.Failed.Count);
-            Assert.DoesNotContain(outcome.Failed, f => f.Reason == NotesImportRunner.NotQueriedReason); // 有過成功→每字都真的查
+            Assert.DoesNotContain(outcome.Failed, f => f.Reason.StartsWith(NotesImportRunner.NotQueriedReason)); // 有過成功→每字都真的查
         }
         finally { File.Delete(path); }
     }

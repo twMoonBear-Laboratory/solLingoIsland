@@ -8,6 +8,7 @@
         列數＝4（NotesImportRow0–3；空行被忽略、檔內重複仍成列以供顯示）。
     (3) 預掃描狀態正確：apple／banana 已在探針夾→狀態含「已在筆記」且**未勾**；cherry→「新字」且**勾**；Cherry→「檔內重複」、未勾且停用。
     (4) 主鈕文案＝「查詢並加入 1 字」（N＝勾選數）；按 [全不選] 後主鈕**停用**且文案為 0 字。
+    (3b) 已在筆記列之狀態含所在夾名「Unit 3 生詞」。
     (5) 按 [取消] 關閉確認頁後：探針夾條目數不變、**AI 動作確認頁（Title 含「正在匯入」）全程未出現**（唯一會發查詢之路徑必經該頁，
         其未出現即 0 次 OpenAI 呼叫之機器證據）；ai-spend-ledger.json 位元組不變只作輔證。
 
@@ -40,8 +41,8 @@ Write-Host "# II.參考準備 ================================" -ForegroundColor
   $appData    = Join-Path $env:APPDATA "LingoIsland"
   $backupDir  = Join-Path $env:TEMP ("LingoIsland-backup-notesimport-" + (Get-Date -Format "yyyyMMddHHmmss"))
   $probeId    = "zzzz309309309309309309309309309f"
-  $probeName  = "ZZ-IMPORT-PROBE"
-  $samplePath = Join-Path $env:TEMP "zz-notes-import-sample.txt"
+  $probeName  = "Unit 3 生詞"            # 手冊圖會入正式 README，探針名須擬真、不用內部代號（S3P B-14）
+  $samplePath = Join-Path $env:TEMP "unit3-words.txt"
   $manualPng  = Join-Path $repoRoot "docs\manual-assets\notes-import-confirm.png"
   Write-Host "* ExePath = $ExePath"
   Write-Host "* OutDir  = $OutDir"
@@ -229,6 +230,7 @@ try {
     Write-Host "* 列$i：名稱「$($r.Current.Name)」狀態「$st」勾＝$isChecked 啟用＝$($r.Current.IsEnabled)"
     if ($r.Current.Name -ne $e.Word)        { $fails += "訴求3：列$i 名稱「$($r.Current.Name)」≠「$($e.Word)」" }
     if ($st -notlike "*$($e.Status)*")      { $fails += "訴求3：列$i（$($e.Word)）狀態「$st」未含「$($e.Status)」" }
+    if ($e.Status -eq "已在筆記" -and $st -notlike "*$probeName*") { $fails += "訴求3b：列$i（$($e.Word)）已在筆記列未標所在夾「$probeName」（實得「$st」）" }
     if ($isChecked -ne $e.Checked)          { $fails += "訴求3：列$i（$($e.Word)）預設勾選＝$isChecked，應為 $($e.Checked)" }
     if ($r.Current.IsEnabled -ne $e.Enabled){ $fails += "訴求3：列$i（$($e.Word)）可改選＝$($r.Current.IsEnabled)，應為 $($e.Enabled)" }
   }

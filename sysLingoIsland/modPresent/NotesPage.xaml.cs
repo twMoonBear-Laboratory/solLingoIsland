@@ -178,19 +178,21 @@ public partial class NotesPage : UserControl
         }
 
         var data = _store.LoadEnsured(); // 以磁碟現況判「已在筆記」（他處可能剛加入）
-        var scan = NotesImport.Scan(NotesImport.ParseLines(content, NotesImport.IsCsv(path)), key => NotesStore.Contains(data, key));
+        var scan = NotesImport.Scan(NotesImport.ParseLines(content, NotesImport.IsCsv(path)),
+            key => NotesStore.FolderOfKey(data, key) is { } f ? NotesStore.FolderPath(data, f.Id) : null); // 已在筆記者附所在夾（B-3）
         if (!scan.IsOk)
         {
             System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this), scan.Error, "匯入清單",
                 System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
             return;
         }
-        var win = new NotesImportWindow(System.IO.Path.GetFileName(path), NotesStore.FolderPath(data, folder.Id) is { Length: > 0 } fp ? fp : folder.Name, scan.Entries)
+        var folderPath = NotesStore.FolderPath(data, folder.Id) is { Length: > 0 } fp ? fp : folder.Name;
+        var win = new NotesImportWindow(System.IO.Path.GetFileName(path), folderPath, scan.Entries)
         {
             Owner = System.Windows.Window.GetWindow(this),
         };
         if (win.ShowDialog() != true || win.SelectedWords.Count == 0) { return; }
-        ImportConfirmed?.Invoke(folder.Id, folder.Name, win.SelectedWords);
+        ImportConfirmed?.Invoke(folder.Id, folderPath, win.SelectedWords); // 結果表與 toast 用同一個路徑名（B-13）
     }
 
     private NoteFolder? Selected => (FolderTree.SelectedItem as TreeViewItem)?.Tag as NoteFolder;
