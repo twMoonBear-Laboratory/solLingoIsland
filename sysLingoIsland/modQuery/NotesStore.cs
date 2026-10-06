@@ -135,6 +135,79 @@ public sealed class NotesStore
     }
 
     /// <summary>
+    /// 加入至**指定 Id 之資料夾（含子夾）**並套底色（spec#14／#309 匯入清單：目標＝筆記頁目前選取之夾，可為任意層）：
+    /// 跨全樹去重（同 <see cref="AddAndSave"/> 語意）、加入即存檔（一字一存，批次中途取消已加者保留）。
+    /// <paramref name="folderId"/> 找不到（例如匯入途中該夾被刪）則退回第一個頂層夾，不丟失該字。
+    /// <paramref name="insertAt"/>：插入索引（批次內保清單序、整批置頂＝第 k 個成功者插在 k；null＝頂端）。
+    /// 存檔失敗**擲出**（不同於 <see cref="Save"/> 之靜默降級）——匯入結果表不得把未落地之字計已加入。回 <see cref="NoteAddResult"/>。
+    /// </summary>
+    public NoteAddResult AddToFolderAndSave(QueryResult r, string folderId, string? colorHex, DateTimeOffset now, int? insertAt = null)
+    {
+        var d = LoadEnsured();
+        var entry = NoteEntry.From(r, now) with { Color = colorHex ?? "" };
+        var folder = FindFolder(d, folderId) ?? d.Folders[0];
+        if (string.IsNullOrEmpty(entry.Key)) { return NoteAddResult.Empty; }
+        if (Contains(d, entry.Key)) { return NoteAddResult.AlreadyExists; }
+        var idx = Math.Clamp(insertAt ?? 0, 0, folder.Entries.Count);
+        folder.Entries.Insert(idx, entry);
+        if (!TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+        return NoteAddResult.Added;
+    }
+
+    /// <summary>存檔並回報成敗（供須偵知寫入失敗之路徑，spec#14）；<see cref="Save"/> 之靜默降級版本仍供既有路徑使用。</summary>
+    public bool TrySave(NotesData d, out string error)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            File.WriteAllText(_path, JsonSerializer.Serialize(d, Opts));
+            error = "";
+            return true;
+        }
+        catch (Exception ex) { error = ex.Message; return false; }
+    }
+
+    /// <summary>資料夾之顯示路徑「父夾 › 子夾」（同名夾可辨，spec#14 確認頁首行）；找不到回空字串。</summary>
+    public static string FolderPath(NotesData d, string folderId)
+    {
+        var chain = new List<string>();
+        bool Walk(IEnumerable<NoteFolder> folders)
+        {
+            foreach (var f in folders)
+            {
+                chain.Add(f.Name);
+                if (f.Id == folderId || Walk(f.Folders)) { return true; }
+                chain.RemoveAt(chain.Count - 1);
+            }
+            return false;
+        }
+        return Walk(d.Folders) ? string.Join(" › ", chain) : "";
+    }
+
+    /// <summary>
+    /// 以**同去重鍵之既有筆記**為對象更新其音標／翻譯並存檔（spec#14／#309：匯入清單勾選「已在筆記」列＝重新查詢刷新原筆）：
+    /// 留在原夾、不重複建立、**保留 Id／AddedAt／Color／練習分數**（字沒變、成績不歸零——與 <see cref="UpdateEntryContent"/> 之「原文已變」語意不同）；
+    /// 原文採既有筆記之寫法（不以 AI 回之大小寫整形覆蓋）。找不到該鍵（他處同時刪除）回 false、不寫入。
+    /// </summary>
+    public bool RefreshEntryByKeyAndSave(QueryResult r)
+    {
+        var key = NoteEntry.KeyOf(r.Original);
+        if (string.IsNullOrEmpty(key)) { return false; }
+        var d = LoadEnsured();
+        foreach (var f in AllFolders(d))
+        {
+            var i = f.Entries.FindIndex(e => e.Key == key);
+            if (i >= 0)
+            {
+                f.Entries[i] = f.Entries[i] with { Phonetic = r.Phonetic, Translation = r.Translation };
+                if (!TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
     /// 批次把多筆**原文**加入指定頂層資料夾（epic #178 增量6′-D：某說話人台詞一鍵收藏、免 AI 翻譯）：
     /// 逐筆建僅含原文之 <see cref="NoteEntry"/>（音標／翻譯空）、跨全樹去重、**依傳入順序附加**（保 cue 時間序）、一次存檔。
     /// <paramref name="folderName"/> 空則退回預設夾；找不到同名頂層夾則建立。回 (已加, 略過＝空白或已存在)。
@@ -190,6 +263,10 @@ public sealed class NotesStore
 
     public static NoteFolder? FindFolder(NotesData d, string id) =>
         AllFolders(d).FirstOrDefault(f => f.Id == id);
+
+    /// <summary>某去重鍵所在之資料夾（spec#14 確認頁顯示「已在筆記「夾名」」）；不在回 null。</summary>
+    public static NoteFolder? FolderOfKey(NotesData d, string key) =>
+        string.IsNullOrEmpty(key) ? null : AllFolders(d).FirstOrDefault(f => f.Entries.Any(e => e.Key == key));
 
     /// <summary>某去重鍵是否已存在於樹中任一資料夾。</summary>
     public static bool Contains(NotesData d, string key) =>
