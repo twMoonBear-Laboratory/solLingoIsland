@@ -147,6 +147,14 @@ public partial class NotesPage : UserControl
     {
         var folder = Selected;
         if (folder is null) { ToastNotifier.Show("請先在左側選一個資料夾，再匯入清單。"); return; } // 守備性：樹恆預選首夾，平時不會到此
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
+        {
+            // 預檢在選檔之前（不讓使用者選完檔、勾完表才被告知）；App 端於執行前再檢一次為守備
+            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this),
+                "尚未設定 OPENAI_API_KEY，匯入後無法線上查詢。請先到主視窗「選項」分頁設定金鑰（或設定同名環境變數），再按「匯入清單」。",
+                "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
             Filter = NotesImport.DialogFilter,

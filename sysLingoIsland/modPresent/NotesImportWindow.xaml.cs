@@ -18,8 +18,8 @@ public partial class NotesImportWindow : Window
     /// <summary>各列核取方塊之 AutomationId 前綴（e2e 以 `NotesImportRow{i}` 定位）。</summary>
     public const string RowAutomationIdPrefix = "NotesImportRow";
 
-    /// <summary>狀態欄固定寬（與 XAML 表頭「狀態」欄同寬，使各列對齊）。</summary>
-    private const double StatusColumnWidth = 300;
+    /// <summary>單字欄固定寬（與 XAML 表頭同寬，使各列對齊）；狀態欄取餘寬，拉寬視窗即可看全夾路徑。</summary>
+    private const double WordColumnWidth = 200;
 
     private readonly List<(NotesImportEntry Entry, CheckBox Box)> _rows = new();
 
@@ -53,8 +53,8 @@ public partial class NotesImportWindow : Window
     {
         var grid = new Grid { Margin = new Thickness(0, 1, 0, 1) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(WordColumnWidth) }); // 固定寬：各列各自成 Grid，Auto 會使欄位逐列錯位
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(StatusColumnWidth) }); // 固定寬：各列各自成 Grid，Auto 會使狀態欄逐列錯位
 
         var box = new CheckBox
         {
@@ -91,6 +91,7 @@ public partial class NotesImportWindow : Window
             FontSize = 11,
             Margin = new Thickness(8, 3, 12, 3),
             TextTrimming = TextTrimming.CharacterEllipsis,
+            ToolTip = NotesImport.StatusText(e), // 截斷時懸停可見全文（夾路徑可能很長）
             VerticalAlignment = VerticalAlignment.Center,
             // 不只靠顏色——狀態文字本身即原因；暖色只是輔助標示
             Foreground = e.Status == NotesImportStatus.New

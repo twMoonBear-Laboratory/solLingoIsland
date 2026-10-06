@@ -209,8 +209,16 @@ public class NotesImportTests
     [InlineData("2024", "2024")]            // 純數字行不剝
     [InlineData("apple", "apple")]
     [InlineData("3D printer", "3D printer")] // 數字後無分隔符不剝
+    [InlineData("1.5 million", "1.5 million")] // 小數開頭不剝（分隔符後須有空白）
     public void StripLeadingNumber_RemovesListNumbering(string line, string expected)
         => Assert.Equal(expected, NotesImport.StripLeadingNumber(line));
+
+    [Fact]
+    public void ParseLines_Txt_SkipsAnkiHeaderCommentLines()
+    {
+        var lines = NotesImport.ParseLines("#separator:tab\n#html:true\napple\tx\n", csv: false);
+        Assert.Equal(new[] { "apple" }, lines);
+    }
 
     [Fact]
     public void ParseLines_Txt_TabSeparated_TakesFirstField_AndStripsNumbering()

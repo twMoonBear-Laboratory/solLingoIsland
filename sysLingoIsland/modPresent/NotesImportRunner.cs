@@ -10,8 +10,11 @@ public sealed record NotesImportOutcome(int Added, int Updated, IReadOnlyList<st
     /// <summary>已加入之字（依寫入順序），供結果表逐字列出（取消後使用者才看得到留下了哪些）。</summary>
     public IReadOnlyList<string> AddedWords { get; init; } = Array.Empty<string>();
 
-    /// <summary>目標夾於寫入時已不存在、字被退回第一個頂層夾——結果表與 toast 須如實說明，不得仍寫原夾名。</summary>
+    /// <summary>目標夾於結束時已不存在——結果表與 toast 須如實說明，不得仍寫原夾名。</summary>
     public bool TargetFolderMissing { get; init; }
+
+    /// <summary>目標夾不存在時字之實際落點（第一個頂層夾之路徑，依名稱排序、未必是「My Notes」）；目標夾在則為空。</summary>
+    public string FallbackFolder { get; init; } = "";
 }
 
 /// <summary>
@@ -82,17 +85,20 @@ public sealed class NotesImportRunner
                         if (_store.RefreshEntryByKeyAndSave(toSave)) { updated++; } else { skipped.Add(w); }
                         streak = 0;
                         break;
-                    default: failed.Add((w, "沒有可儲存的內容")); streak++; break;
+                    default: failed.Add((w, "沒有可儲存的內容")); streak++; if (firstError.Length == 0) { firstError = "沒有可儲存的內容"; } break;
                 }
             }
             catch (OperationCanceledException) { cancelled = true; break; }
             catch (Exception ex) { failed.Add((w, ex.Message)); streak++; if (firstError.Length == 0) { firstError = ex.Message; } }   // QueryException／存檔 IOException——一字失敗不影響其他字
         }
+        var dEnd = _store.LoadEnsured();
+        var missing = NotesStore.FindFolder(dEnd, folderId) is null;
         return new NotesImportOutcome(added, updated, skipped, failed)
         {
             Cancelled = cancelled,
             AddedWords = addedWords,
-            TargetFolderMissing = added > 0 && NotesStore.FindFolder(_store.LoadEnsured(), folderId) is null,
+            TargetFolderMissing = missing,
+            FallbackFolder = missing ? NotesStore.FolderPath(dEnd, dEnd.Folders[0].Id) : "",
         };
     }
 }

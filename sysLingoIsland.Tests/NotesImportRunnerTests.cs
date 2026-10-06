@@ -13,7 +13,7 @@ namespace LingoIsland.Tests;
 /// <summary>
 /// [modPresent模組] 筆記清單匯入契約（spec#14，#309）之批次執行器——整合層（intTest）：以 fake 查詢委派（<b>零 OpenAI 呼叫</b>）
 /// 對**真實 notes.json 臨時檔**驗逐字查詢→寫入目前選取夾（含子夾）→一字一存；失敗不中斷其餘；取消時已加者保留；
-/// 已在筆記者略過不覆寫；夾被刪時退回預設夾不丟字。
+/// 已在筆記者勾選＝刷新原筆、不重複建立；夾被刪時退回預設夾不丟字。
 /// </summary>
 public class NotesImportRunnerTests
 {

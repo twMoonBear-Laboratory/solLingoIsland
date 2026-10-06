@@ -81,6 +81,7 @@ public static class NotesImport
             if (csv) { line = FirstCsvField(raw); }
             else
             {
+                if (line.TrimStart().StartsWith("#")) { continue; }   // Anki 匯出檔頭 `#separator:tab`／`#html:true` 等註解行
                 var tab = line.IndexOf('\t');
                 if (tab >= 0) { line = line[..tab]; }          // Anki／試算表 TSV：只取第一欄
                 line = StripLeadingNumber(line);
@@ -98,7 +99,7 @@ public static class NotesImport
     public static string StripLeadingNumber(string line)
     {
         var s = line.TrimStart();
-        var m = System.Text.RegularExpressions.Regex.Match(s, @"^\(?\d{1,3}[.)、．]\s*(?=\S)");
+        var m = System.Text.RegularExpressions.Regex.Match(s, @"^\(?\d{1,3}(?:[.)]\s+|[、．]\s*)(?=\S)"); // `.`／`)` 後須有空白（`1.5 million` 不剝）；中文頓號可不留空
         return m.Success ? s[m.Length..] : line;
     }
 
@@ -193,7 +194,11 @@ public static class NotesImport
     {
         var sb = new StringBuilder();
         sb.Append($"匯入完成：已加入 {added} 字到「{folderName}」");
-        if (addedWords is { Count: > 0 }) { sb.Append($"（{string.Join("、", addedWords)}）"); }
+        if (addedWords is { Count: > 0 })
+        {
+            const int show = 20; // 500 字時不讓首段成一大段、把失敗清單推到最下
+            sb.Append($"（{string.Join("、", addedWords.Take(show))}" + (addedWords.Count > show ? $" …等 {addedWords.Count} 字）" : "）"));
+        }
         if (updated > 0) { sb.Append($"、更新 {updated} 字（原筆留在原夾）"); }
         if (skipped.Count > 0) { sb.Append($"、略過 {skipped.Count} 字"); }
         if (failed.Count > 0) { sb.Append($"、失敗 {failed.Count} 字"); }
