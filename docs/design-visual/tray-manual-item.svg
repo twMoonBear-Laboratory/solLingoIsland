@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="330" viewBox="0 0 300 330" font-family="Segoe UI, Microsoft JhengHei, sans-serif">
+  <!-- #311 系統匣右鍵選單加「使用手冊」：置「關於」之後、分隔線與「結束」之前（版面示意） -->
+  <rect x="0" y="0" width="300" height="330" fill="#F3F3F3"/>
+  <rect x="20" y="12" width="200" height="306" fill="#FFFFFF" stroke="#CCCCCC"/>
+  <text x="34" y="34" font-size="12" fill="#999999">● 金鑰已就緒（OPENAI_API_KEY）</text>
+  <line x1="28" y1="44" x2="212" y2="44" stroke="#DDDDDD"/>
+  <text x="34" y="66" font-size="12" fill="#222222">開啟主視窗</text>
+  <text x="34" y="92" font-size="12" fill="#222222">字典</text>
+  <text x="34" y="118" font-size="12" fill="#222222">查詢歷史</text>
+  <text x="34" y="144" font-size="12" fill="#222222">我的筆記</text>
+  <text x="34" y="170" font-size="12" fill="#222222">擷取</text>
+  <text x="34" y="196" font-size="12" fill="#222222">選項</text>
+  <text x="34" y="222" font-size="12" fill="#222222">關於</text>
+  <rect x="24" y="230" width="192" height="24" fill="#FCE4EC" stroke="#D97CA6"/>
+  <text x="34" y="247" font-size="12" font-weight="600" fill="#B0578D">使用手冊</text>
+  <line x1="28" y1="266" x2="212" y2="266" stroke="#DDDDDD"/>
+  <text x="34" y="290" font-size="12" fill="#222222">結束</text>
+  <text x="228" y="247" font-size="9.5" fill="#B692A6">← #311</text>
+</svg>
