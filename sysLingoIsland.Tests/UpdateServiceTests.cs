@@ -1,8 +1,10 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using LingoIsland;
 using LingoIsland.Present;
 using Xunit;
@@ -110,5 +112,32 @@ public class UpdateServiceTests
         Assert.Equal(AppStatusText.UpdateFailedSource, AppStatusText.UpdateFailureMessage(UpdateCheckResult.FailedSource));
         Assert.NotEqual(AppStatusText.UpdateFailedRateLimited, AppStatusText.UpdateFailedOffline);
         Assert.DoesNotContain("connection", AppStatusText.UpdateFailedRateLimited, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>#310：更新來源須指現行 org（2026-10-06 搬至 twMoonBear-Laboratory），不得再靠舊 org 轉址。</summary>
+    [Fact]
+    public void RepoUrl_PointsToCurrentOrg()
+    {
+        Assert.Equal("https://github.com/twMoonBear-Laboratory/solLingoIsland", UpdateService.RepoUrl);
+    }
+
+    /// <summary>#310：關於頁 GitHub 連結與更新來源同值（以文字讀 XAML 比對，不需 STA 載入），防兩處再漂移。</summary>
+    [Fact]
+    public void AboutPageGitHubLink_EqualsRepoUrl()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        string? xamlPath = null;
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(dir.FullName, "sysLingoIsland", "modPresent", "AboutPage.xaml");
+            if (File.Exists(candidate)) { xamlPath = candidate; break; }
+            dir = dir.Parent;
+        }
+        Assert.NotNull(xamlPath);
+
+        var xaml = File.ReadAllText(xamlPath!);
+        var m = Regex.Match(xaml, "x:Name=\"GitHubLink\"\\s+NavigateUri=\"([^\"]+)\"");
+        Assert.True(m.Success, "AboutPage.xaml 找不到 GitHubLink 之 NavigateUri");
+        Assert.Equal(UpdateService.RepoUrl, m.Groups[1].Value);
     }
 }
