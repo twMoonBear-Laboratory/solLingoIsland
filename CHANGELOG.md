@@ -12,6 +12,7 @@
 ### 內部
 - 線上查詢層以委派注入（`NotesImportRunner`），單元／整合測試以 fake 覆蓋成功、失敗不中斷、取消、更新原筆等全路徑——**測試零 OpenAI 額度**；端端 UIA 腳本 `test/scripts/captureNotesImport.ps1` 只走到確認表並取消，以「AI 動作進度視窗全程未出現」為 0 次呼叫之機器證據。
 - `NotesStore` 新增依資料夾 Id 寫入（`AddToFolderAndSave`）與依去重鍵刷新原筆（`RefreshEntryByKeyAndSave`）兩個入口；既有加入路徑不變。
+- **自動更新來源與關於頁連結改指現行 GitHub org `twMoonBear-Laboratory`**（#310，chore、不另進位，隨 4.16.0 交付）：repo 已搬家，舊網址原本靠 GitHub 轉址撐著、轉址不保證永久；這一版起檢查更新直接連新位址，使用者不必做任何事。`LICENSE`、README 下載連結、設計文件同批改齊；單元測試鎖住更新來源與關於頁連結同值。
 
 ## [4.15.0] - 2026-08-22
 

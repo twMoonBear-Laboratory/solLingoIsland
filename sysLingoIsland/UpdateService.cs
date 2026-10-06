@@ -44,7 +44,7 @@ internal enum UpdateFailureKind
 public sealed class UpdateService
 {
     /// <summary>預設更新源：本專案之 GitHub Releases（資產含 releases.win.json 與 nupkg）。</summary>
-    public const string RepoUrl = "https://github.com/twStellerWhale-Ocean2/solLingoIsland";
+    public const string RepoUrl = "https://github.com/twMoonBear-Laboratory/solLingoIsland";
 
     /// <summary>更新源覆寫環境變數（測試縫／自訂佈署）：URL 或本地路徑 feed；不設＝GitHub Releases。</summary>
     public const string FeedOverrideEnv = "LINGOISLAND_UPDATE_URL";

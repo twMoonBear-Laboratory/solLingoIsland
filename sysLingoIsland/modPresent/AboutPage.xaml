@@ -23,7 +23,7 @@
                      Foreground="{StaticResource PinkSub}" Margin="0,8,0,2"/>
           <TextBlock Text="聯絡：carlton0521@gmail.com" FontSize="12.5" Foreground="{StaticResource PinkSub}"/>
           <TextBlock FontSize="12.5" Margin="0,2,0,0">
-            <Hyperlink x:Name="GitHubLink" NavigateUri="https://github.com/twStellerWhale-Ocean2/solLingoIsland"
+            <Hyperlink x:Name="GitHubLink" NavigateUri="https://github.com/twMoonBear-Laboratory/solLingoIsland"
                        RequestNavigate="OnOpenLink" Foreground="{StaticResource PinkText}">GitHub</Hyperlink>
           </TextBlock>
           <TextBlock Text="辨識與翻譯由 OpenAI 提供；朗讀採 Windows 內建語音。" FontSize="11.5"
