@@ -129,8 +129,16 @@ try {
     }
     if ($null -eq $list) { throw "找不到 $Label 清單（AutomationId=$ListId）" }
 
-    $items = $list.FindAll([System.Windows.Automation.TreeScope]::Children,
-               [System.Windows.Automation.Condition]::TrueCondition)
+    # #317：清單項目可能晚於清單本身出現——輪詢至有項目（每 200ms、上限 5 秒），逾時才判「無資料項」
+    $items = $null
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    do {
+      $items = $list.FindAll([System.Windows.Automation.TreeScope]::Children,
+                 [System.Windows.Automation.Condition]::TrueCondition)
+      if ($items.Count -gt 0) { break }
+      Start-Sleep -Milliseconds 200
+    } while ($sw.ElapsedMilliseconds -lt 5000)
+    Write-Host ("* {0} 清單項目 {1} 個（輪詢等待 {2} ms）" -f $Label, $items.Count, $sw.ElapsedMilliseconds)
     if ($items.Count -eq 0) { Write-Host "* [略過] $Label 無資料項" -ForegroundColor Yellow; return }
 
     # 取「標題最長」之卡片量測——最可能觸發換行；標題短到不需換行者本就不該換，拿它判會誤殺
@@ -188,17 +196,25 @@ try {
       $script:fails += "$Label：右鍵座標 ($rcx,$rcy) 被他窗覆蓋，無法驗 hit-test"
     } else {
       [Win32Ui]::RightClick($rcx, $rcy)
-      Start-Sleep -Milliseconds 700
       $menuCond = New-Object System.Windows.Automation.AndCondition(
         (New-Object System.Windows.Automation.PropertyCondition(
           [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
           [System.Windows.Automation.ControlType]::Menu)),
         (New-Object System.Windows.Automation.PropertyCondition(
           [System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$app.ProcessId)))
-      $menu = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-                [System.Windows.Automation.TreeScope]::Descendants, $menuCond)
+      # #317：原為固定 700ms 後單次 FindFirst——影片頁初始化慢時選單晚出現即誤判紅（flaky）。
+      # 改輪詢：每 200ms 查一次、上限 5 秒，逾時才判紅；實際等待毫秒記入 log。
+      $menu = $null
+      $sw = [System.Diagnostics.Stopwatch]::StartNew()
+      do {
+        $menu = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                  [System.Windows.Automation.TreeScope]::Descendants, $menuCond)
+        if ($null -ne $menu) { break }
+        Start-Sleep -Milliseconds 200
+      } while ($sw.ElapsedMilliseconds -lt 5000)
+      Write-Host ("* {0}：右鍵選單輪詢等待 {1} ms（{2}）" -f $Label, $sw.ElapsedMilliseconds, $(if ($null -ne $menu) { '已出現' } else { '逾時 5000 ms' }))
       if ($null -eq $menu) {
-        $script:fails += "$Label：右鍵未喚出選單——容器改 Grid 後卡片可能收不到滑鼠事件"
+        $script:fails += "$Label：右鍵未喚出選單（輪詢 5 秒逾時）——容器改 Grid 後卡片可能收不到滑鼠事件"
       } else {
         $names = @()
         foreach ($mi in $menu.FindAll([System.Windows.Automation.TreeScope]::Descendants,
@@ -210,7 +226,13 @@ try {
         Write-Host ("* [PASS] {0}：右鍵選單喚出（項目：{1}）" -f $Label, (($names | Select-Object -Unique) -join " / ")) -ForegroundColor Green
       }
       [Win32Ui]::KeyTap(0x1B, 40)   # Esc 關閉選單（不點 Delete、不動使用者資料）
-      Start-Sleep -Milliseconds 400
+      # #317：輪詢至選單確實關閉（每 200ms、上限 5 秒），免得殘留選單干擾下一櫃之操作
+      $sw = [System.Diagnostics.Stopwatch]::StartNew()
+      while ($sw.ElapsedMilliseconds -lt 5000 -and $null -ne
+             [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+               [System.Windows.Automation.TreeScope]::Descendants, $menuCond)) {
+        Start-Sleep -Milliseconds 200
+      }
     }
   }
   #endregion
