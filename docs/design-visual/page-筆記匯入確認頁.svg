@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="820" height="500" viewBox="0 0 820 500" font-family="Segoe UI, Microsoft JhengHei, PingFang TC, system-ui, sans-serif">
-  <!-- [modHmi筆記匯入確認頁]：NotesImportWindow（Title「匯入清單」、有自備中譯時約 800×460（無則 640×460、無中譯來源欄與切換）、ShowDialog、Owner＝主視窗、CenterOwner）。spec#14／#309；#320 多檔：來源欄、首行列檔數、未納入行；#321 csv 第二欄自備中譯：中譯來源欄、整批「也改查線上」、費用與主鈕依線上查詢數。設計期參考稿、以文字為準。 -->
+  <!-- [modHmi筆記匯入確認頁]：NotesImportWindow（Title「匯入清單」、有自備中譯時約 800×460（無則 640×460、無中譯來源欄與切換）、ShowDialog、Owner＝主視窗、CenterOwner）。spec#14／#309；#320 多檔：來源欄、首行列檔數、未納入行；#321 csv 第二欄自備中譯：中譯來源欄、整批「也改查線上」、費用與主鈕依線上查詢數；#323：「只勾上次失敗字（N）」鈕、上次失敗之列狀態附註。設計期參考稿、以文字為準。 -->
   <rect width="820" height="500" fill="#FFF0F5"/>
 
   <!-- owner 視窗（模態期間不可操作，以淡化示意）：主視窗『筆記』分頁 -->
@@ -29,14 +29,16 @@
   <!-- 未納入（有才顯示） -->
   <text x="46" y="102" font-size="11" fill="#A06A20">未納入：notes.docx（不是 .txt／.csv）</text>
 
-  <!-- 表上方：全選新字／全不選／（#321）整批切換 -->
+  <!-- 表上方：全選新字／全不選／（#323）只勾上次失敗字（N）／（#321）整批切換 -->
   <rect x="46" y="112" width="78" height="22" rx="11" fill="#FBE4EC" stroke="#E8A9C0"/>
   <text x="85" y="127" font-size="11" text-anchor="middle" fill="#5C3346">全選新字</text>
   <rect x="132" y="112" width="62" height="22" rx="11" fill="#FBE4EC" stroke="#E8A9C0"/>
   <text x="163" y="127" font-size="11" text-anchor="middle" fill="#5C3346">全不選</text>
-  <rect x="206" y="117" width="12" height="12" rx="2" fill="#FFFFFF" stroke="#999"/>
-  <text x="224" y="127" font-size="11" fill="#5C3346">有自備中譯的字也改查線上</text>
-  <text x="774" y="127" font-size="11" text-anchor="end" fill="#8A5A6D">共 5 列：新字 3、已在筆記 1、重複 1、有自備中譯 3</text>
+  <rect x="202" y="112" width="122" height="22" rx="11" fill="#FBE4EC" stroke="#E8A9C0"/>
+  <text x="263" y="127" font-size="11" text-anchor="middle" fill="#5C3346">只勾上次失敗字（1）</text>
+  <rect x="336" y="117" width="12" height="12" rx="2" fill="#FFFFFF" stroke="#999"/>
+  <text x="354" y="127" font-size="11" fill="#5C3346">有自備中譯的字也改查線上</text>
+  <text x="774" y="127" font-size="11" text-anchor="end" fill="#8A5A6D">共 5 列：新字 3、已在筆記 1、重複 1、有…</text>
 
   <!-- 彙總確認表：勾｜單字／片語｜來源｜中譯來源｜狀態 -->
   <rect x="46" y="142" width="728" height="222" rx="6" fill="#FFFFFF" stroke="#E8A9C0"/>
@@ -66,7 +68,7 @@
   <text x="94" y="246" font-size="12" fill="#333">cherry</text>
   <text x="250" y="246" font-size="11" fill="#8A5A6D">unit1.csv</text>
   <text x="350" y="246" font-size="11" fill="#8A5A6D">線上查詢</text>
-  <text x="510" y="246" font-size="11" fill="#4A7A4A">新字</text>
+  <text x="510" y="246" font-size="11" fill="#4A7A4A">新字；上次匯入失敗</text>
   <!-- 列 4：新字（片語）、自備中譯（含逗號之引號欄位） -->
   <rect x="56" y="265" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
   <text x="58" y="275" font-size="10" fill="#FFFFFF">✓</text>
