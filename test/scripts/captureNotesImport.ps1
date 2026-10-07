@@ -27,6 +27,13 @@
     ⑬ 勾整批切換→全部「線上查詢」、主鈕「查詢並加入 3 字」→取消勾→還原。
     ⑭ 先斷言 kiwi 已勾再取消→主鈕「加入 2 字（不查詢）」→實按→結果訊息框「已加入 2 字」「採用自備中譯」→AI 動作頁未出現、帳本不變、
        notes.json 之 grape／mango 中譯＝自備、音標空、kiwi 未寫入。
+  #322（大量匯入改背景執行，spec#14 擴充）增走（受測 app 自起手即帶測試縫 LINGOISLAND_IMPORT_FAKE_LOOKUP_MS=1200——
+  延遲假查詢、零網路、零額度；①–⑭ 不發線上查詢，測試縫不影響其斷言；⑤⑩ 之零呼叫證據改為 AI 動作頁與結果視窗皆未出現）：
+    ⑮ 8 字 txt 實按加入→確認頁關、AI 動作頁未出現、進度列「已完成 n／8」→切歷史再切回筆記（非模態）→等已完成數再增→按「字母」排序（筆記頁整份寫回）
+       →出現「約剩」時擷取手冊圖 notes-import-background.png→結果視窗「匯入完成」「已加入 8 字」→進度列隱藏、8 字皆在且中譯為〔測試假查詢〕。
+    ⑯ 20 字 txt 實按加入→執行中再按「匯入清單」：不開檔案對話框、toast「已有一批匯入正在進行」。
+    ⑰ 同批已完成 ≥2 時按進度列「取消」→結果視窗「匯入已取消」→notes.json 該批字數 k＝結果之「已加入 k 字」且 2≤k≤19。
+    ⑱ 20 字 txt 實按加入→PostMessage(WM_CLOSE) 關主視窗→確認框「匯入進行中」→按「否」：app 仍在、匯入續進→再關→按「是」：行程結束、已加入者保留。
   落點被他窗覆蓋即據實中止（不判 PASS）。
 
   查詢並加入之成功／失敗路徑由 NotesImportRunnerTests 以 fake 委派覆蓋（零額度）；本腳本刻意只走到確認頁並取消，不花 OpenAI 額度（USR 常設裁定）。
@@ -72,6 +79,17 @@ Write-Host "# II.參考準備 ================================" -ForegroundColor
   $unit5Path  = Join-Path $sampleDir "unit5-bilingual.csv"
   $ownPng     = Join-Path $repoRoot "docs\manual-assets\notes-import-own-translation.png"
   $sampleOwnWords = @("grape", "kiwi", "mango")   # #321 樣本字：植探針前自全樹移除，免受測者真筆記已有而誤判
+  # #322 樣本字（擬真：手冊圖會入 README）：⑮ 8 字、⑯⑰ 20 字、⑱ 20 字
+  $bgWords     = @("orbit", "comet", "nebula", "galaxy", "crater", "meteor", "eclipse", "aurora")
+  $cancelWords = @("asteroid", "telescope", "satellite", "gravity", "horizon", "equator", "glacier", "volcano", "canyon", "plateau",
+                   "lagoon", "tundra", "savanna", "monsoon", "drought", "erosion", "fossil", "mineral", "crystal", "magma")
+  $exitWords   = @("harbor", "lighthouse", "anchor", "voyage", "compass", "sailor", "island", "current", "tide", "reef",
+                   "coral", "shore", "cliff", "dune", "bay", "peninsula", "strait", "archipelago", "estuary", "delta")
+  $unit6Path = Join-Path $sampleDir "unit6-background.txt"
+  $unit7Path = Join-Path $sampleDir "unit7-cancel.txt"
+  $unit8Path = Join-Path $sampleDir "unit8-exit.txt"
+  $bgPng     = Join-Path $repoRoot "docs\manual-assets\notes-import-background.png"
+  $origFakeMs = $env:LINGOISLAND_IMPORT_FAKE_LOOKUP_MS
   $origApiKey = $env:OPENAI_API_KEY
   Write-Host "* ExePath = $ExePath"
   Write-Host "* OutDir  = $OutDir"
@@ -344,6 +362,78 @@ public static class MouseDrag
     $p = Join-Path $appData "ai-spend-ledger.json"
     if (Test-Path $p) { return [System.IO.File]::ReadAllBytes($p) } else { return [byte[]]@() }
   }
+
+  # ---- #322 輔助 ----
+  if (-not ("Win32Post" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32Post
+{
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr w, IntPtr l);
+    public static bool Close(IntPtr hwnd) { return PostMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero); } // WM_CLOSE：不阻塞腳本（UIA WindowPattern.Close 會等模態框）
+}
+"@
+  }
+  # 結果視窗（#322：Title「匯入清單：完成／已取消／中斷」、AutomationId NotesImportResultWindow；非模態、不搶焦點）
+  function Wait-ResultWindow { param([int]$TimeoutSec = 30) return Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "匯入清單：*" -ExcludeHwnd $hwnd -TimeoutSec $TimeoutSec }
+  function Read-ResultWindow {
+    param($Win)
+    $h = Find-ByAutomationId -Root $Win -Id "NotesImportResultHeader"
+    $b = Find-ByAutomationId -Root $Win -Id "NotesImportResultText"
+    $body = ""
+    if ($null -ne $b) { try { $body = $b.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { $body = $b.Current.Name } }
+    return [pscustomobject]@{ Title = $Win.Current.Name; Header = $(if ($null -ne $h) { $h.Current.Name } else { "" }); Body = $body }
+  }
+  function Close-ResultWindow { param($Win) $ok = Find-ByAutomationId -Root $Win -Id "NotesImportResultOk"; if ($null -ne $ok) { Invoke-El $ok }; Start-Sleep -Milliseconds 500 }
+  # Win32 訊息框之按鈕：不限控制型別、名稱去「(&N)」等加速鍵後比對（實撞：依 ControlType.Button 過濾取不到）
+  function Find-AskButton {
+    param($Win, [string[]]$Names)
+    foreach ($el in $Win.FindAll($TS::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+      $n = ($el.Current.Name -replace "\(&?[A-Za-z]\)", "" -replace "&", "").Trim()
+      if ($Names -contains $n) { return $el }
+    }
+    return $null
+  }
+  # 實撞：WM_CLOSE 處理中開出之 Win32 訊息框，其按鈕於 UIA 僅呈現為無 Invoke Pattern 之 Pane——改以座標點擊（先帶前景並確認落點屬受測 app）
+  function Press-AskButton {
+    param($Win, $Btn, [string]$Tag)
+    [Win32Ui]::ForceForeground([IntPtr]$Win.Current.NativeWindowHandle); Start-Sleep -Milliseconds 400
+    $r = $Btn.Current.BoundingRectangle
+    $x = [int]($r.X + $r.Width / 2); $y = [int]($r.Y + $r.Height / 2)
+    if ([Win32Ui]::PidAtPoint($x, $y) -ne [uint32]$app.ProcessId) { throw "$Tag：確認框按鈕落點被他窗覆蓋——本輪無法判定，據實中止" }
+    Click-Element -El $Btn
+  }
+  function Get-ProgressText { $t = Find-ByAutomationId -Root $root -Id "NotesImportProgressText"; if ($null -eq $t) { return "" } else { return $t.Current.Name } }
+  function Get-ProgressDone { $m = [regex]::Match((Get-ProgressText), "已完成 (\d+)／(\d+)"); if ($m.Success) { return [int]$m.Groups[1].Value } else { return -1 } }
+  function Wait-ProgressDone { param([int]$AtLeast, [int]$TimeoutSec = 20) $end = (Get-Date).AddSeconds($TimeoutSec); while ((Get-Date) -lt $end) { $d = Get-ProgressDone; if ($d -ge $AtLeast) { return $d }; Start-Sleep -Milliseconds 250 }; return (Get-ProgressDone) }
+  function Count-Words { param([string[]]$Words) $j = Get-Content (Join-Path $appData "notes.json") -Raw -Encoding UTF8 | ConvertFrom-Json; return @(Get-AllFolders $j.Folders | ForEach-Object { @($_.Entries) } | Where-Object { $Words -contains $_.Original }).Count }
+  # 選探針夾→匯入鈕→檔案對話框選檔→確認頁→斷言主鈕文案→實按（只在主鈕為預期之全線上文案時才按）
+  function Start-BackgroundImport {
+    param([string]$Path, [int]$N, [string]$Tag)
+    Set-WindowForeground -Hwnd $hwnd | Out-Null; Start-Sleep -Milliseconds 300
+    $tree = Find-ByAutomationId -Root $root -Id "FolderTree"
+    $pt = @($tree.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Text))) | Where-Object { $_.Current.Name -eq $probeName }) | Select-Object -First 1
+    if ($null -eq $pt) { throw "$Tag：資料夾樹找不到探針夾「$probeName」" }
+    $r = $pt.Current.BoundingRectangle
+    if ([Win32Ui]::PidAtPoint([int]($r.X + 4), [int]($r.Y + $r.Height / 2)) -ne [uint32]$app.ProcessId) { throw "$Tag：探針夾座標被他窗覆蓋——本輪無法判定，據實中止" }
+    Click-Element -El $pt; Start-Sleep -Milliseconds 500
+    Invoke-El (Find-ByAutomationId -Root $root -Id "NotesImportBtn")
+    $dlg = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "選擇英文清單*" -ExcludeHwnd $hwnd -TimeoutSec 15
+    if ($null -eq $dlg) { throw "$Tag：按匯入鈕後未見檔案對話框" }
+    $dh = [IntPtr]$dlg.Current.NativeWindowHandle
+    [Win32Ui]::ForceForeground($dh); Start-Sleep -Milliseconds 500
+    if ([Win32Ui]::GetForegroundWindow() -ne $dh) { throw "$Tag：檔案對話框未能帶到前景，鍵入會落空" }
+    [System.Windows.Forms.SendKeys]::SendWait("^a"); Start-Sleep -Milliseconds 120
+    [System.Windows.Forms.SendKeys]::SendWait($Path); Start-Sleep -Milliseconds 400
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    $c = Wait-Confirm -TimeoutSec 15
+    if ($null -eq $c) { throw "$Tag：選檔後未見確認頁" }
+    $b = Find-ByAutomationId -Root $c -Id "NotesImportConfirm"
+    if ($b.Current.Name -ne "查詢並加入 $N 字") { throw "$Tag：主鈕「$($b.Current.Name)」≠「查詢並加入 $N 字」——不實按，據實中止" }
+    Invoke-El $b
+    Write-Host "* $Tag：已實按「查詢並加入 $N 字」"
+  }
   #endregion
 #endregion
 
@@ -362,9 +452,11 @@ try {
   Write-Host "* 已備份 $appData → $backupDir"
 
   $notesJson = Join-Path $appData "notes.json"
-  $data = if (Test-Path $notesJson) { Get-Content $notesJson -Raw -Encoding UTF8 | ConvertFrom-Json } else { [pscustomobject]@{ Folders = @() } }
+  # #322：一律自乾淨之筆記起手（APPDATA 已備份、finally 還原）——手冊圖會露出資料夾樹，不得帶出受測者真實資料夾名
+  $data = [pscustomobject]@{ Folders = @([pscustomobject]@{ Id = ([guid]::NewGuid().ToString("N")); Name = "My Notes"; Folders = @(); Sort = $null; Entries = @() }) }
   $data.Folders = @(@($data.Folders) | Where-Object { $_.Id -ne $probeId })
   Remove-WordsEverywhere $data.Folders $sampleOwnWords   # #321：樣本字不得預先存在（APPDATA 已備份、finally 還原）
+  Remove-WordsEverywhere $data.Folders ($bgWords + $cancelWords + $exitWords)   # #322 樣本字同理
   $mkEntry = { param($w) [pscustomobject]@{ Id = ([guid]::NewGuid().ToString("N")); AddedAt = "2026-10-06T00:00:00.0000000+08:00"; Original = $w; Phonetic = "[$w]"; Translation = "譯:$w"; Color = ""; PracticeScore = -1 } }
   $data.Folders = @($data.Folders) + ([pscustomobject]@{
     Id = $probeId; Name = $probeName; Folders = @(); Sort = $null
@@ -385,6 +477,9 @@ try {
   Write-Host "* 已寫 #320 樣本：unit4-words.csv（表頭＋grape＋CHERRY）、notes.docx、old-big5.txt（Big5 含中文）"
 
   [System.IO.File]::WriteAllText($samplePath, "apple`r`nbanana`r`n`r`n  cherry  `r`nCherry`r`n", (New-Object System.Text.UTF8Encoding($true)))
+  [System.IO.File]::WriteAllText($unit6Path, ($bgWords -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+  [System.IO.File]::WriteAllText($unit7Path, ($cancelWords -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+  [System.IO.File]::WriteAllText($unit8Path, ($exitWords -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
   Write-Host "* 已寫樣本 txt（含 BOM、空行、前後空白、大小寫重複）"
   $entriesBefore = Get-ProbeEntryCount
   $ledgerBefore  = Get-LedgerBytes
@@ -395,6 +490,7 @@ try {
   Write-Host "## B.啟動 App、切筆記頁、選探針夾 --------------------------------" -ForegroundColor Cyan
   # #321：受測 app 以明顯無效之假金鑰啟動（子行程繼承本行程環境變數）——金鑰預檢照常通過，萬一誤觸查詢也只得 401、不計費；finally 還原
   $env:OPENAI_API_KEY = "sk-e2e-invalid-placeholder-not-a-real-key-321"
+  $env:LINGOISLAND_IMPORT_FAKE_LOOKUP_MS = "1200"   # #322 測試縫：延遲假查詢（零網路、零額度）；finally 還原
   $app  = Start-AppAndGetWindow -ExePath $ExePath -TimeoutSec 30
   $hwnd = $app.Hwnd
   Set-WindowMaximized -Hwnd $hwnd | Out-Null
@@ -520,8 +616,9 @@ try {
   $still = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "匯入清單" -ExcludeHwnd $hwnd -TimeoutSec 1
   if ($null -ne $still) { $fails += "訴求5：按取消後確認頁仍開著" } else { Write-Host "* [OK] 確認頁已關閉" -ForegroundColor Green }
   $aiWin = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "*正在匯入*" -ExcludeHwnd $hwnd -TimeoutSec 1
-  if ($null -ne $aiWin) { $fails += "訴求5：AI 動作確認頁（正在匯入…）出現了——取消路徑不該發出任何查詢" }
-  else { Write-Host "* [OK] AI 動作確認頁全程未出現（＝0 次 AI 呼叫）" -ForegroundColor Green }
+  $resWin = Wait-ResultWindow -TimeoutSec 1   # #322：查詢改走背景執行，任何結局必留結果視窗
+  if ($null -ne $aiWin -or $null -ne $resWin) { $fails += "訴求5：AI 動作確認頁或匯入結果視窗出現了——取消路徑不該發出任何查詢" }
+  else { Write-Host "* [OK] AI 動作確認頁與匯入結果視窗全程未出現（＝0 次 AI 呼叫）" -ForegroundColor Green }
   $entriesAfter = Get-ProbeEntryCount
   $ledgerAfter  = Get-LedgerBytes
   Write-Host "* 收尾：探針夾條目數＝$entriesAfter（起手 $entriesBefore）／AI 花費帳本 $($ledgerAfter.Length) bytes（起手 $($ledgerBefore.Length)）"
@@ -677,7 +774,8 @@ try {
   #region K.#320 ⑩ 全程零 AI 呼叫、條目不增 --------------------------------
   Write-Host "## K.#320 ⑩ 全程零呼叫 --------------------------------" -ForegroundColor Cyan
   $aiWin = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "*正在匯入*" -ExcludeHwnd $hwnd -TimeoutSec 1
-  if ($null -ne $aiWin) { $fails += "⑩：AI 動作確認頁出現了" }
+  if ($null -eq $aiWin) { $aiWin = Wait-ResultWindow -TimeoutSec 1 }   # #322：併同結果視窗未出現
+  if ($null -ne $aiWin) { $fails += "⑩：AI 動作確認頁或匯入結果視窗出現了" }
   $p1 = Get-ProbeEntryCount; $p2 = Get-FolderEntryCount $probe2Id
   Write-Host "* 探針夾條目＝$p1（起手 $entriesBefore，⑪ 移走 1）／第二探針夾＝$p2"
   if ($p1 + $p2 -ne $entriesBefore) { $fails += "⑩：兩探針夾條目合計 $($p1 + $p2) ≠ 起手 $entriesBefore——有寫入發生" }
@@ -768,26 +866,15 @@ try {
   if ($btn.Current.Name -ne "加入 2 字（不查詢）") { throw "⑭：主鈕「$($btn.Current.Name)」≠「加入 2 字（不查詢）」——不實按，據實中止（避免走到線上查詢）" }
   if ($cost -notlike "*不會呼叫 AI*") { $fails += "⑭：費用揭露「$cost」未含「不會呼叫 AI」" }
   Invoke-El $btn
-  $msg = $null
-  $deadline = (Get-Date).AddSeconds(15)
-  while ((Get-Date) -lt $deadline -and $null -eq $msg) {
-    $w = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "匯入清單" -ExcludeHwnd $hwnd -TimeoutSec 1
-    if ($null -ne $w -and $null -eq (Find-ByAutomationId -Root $w -Id "NotesImportConfirm")) { $msg = $w }
-  }
-  if ($null -eq $msg) { $fails += "⑭：按下後未見結果訊息框（Title 匯入清單）" }
+  $msg = Wait-ResultWindow -TimeoutSec 15   # #322：全自備之結果改用非模態結果視窗（取代 MessageBox）
+  if ($null -eq $msg) { $fails += "⑭：按下後未見結果視窗（Title 匯入清單：…）" }
   else {
-    # Win32 訊息框之文字元件可能稍後才填入 UIA 名稱：輪詢至含「匯入完成」或逾時（任何控制型別皆看）
-    $msgText = ""
-    $tEnd = (Get-Date).AddSeconds(5)
-    while ((Get-Date) -lt $tEnd -and $msgText -notlike "*匯入完成*") {
-      $msgText = (@($msg.FindAll($TS::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) -join " ")
-      if ($msgText -notlike "*匯入完成*") { Start-Sleep -Milliseconds 300 }
-    }
-    Write-Host "* ⑭ 結果訊息＝「$msgText」"
-    if ($msgText -notlike "*已加入 2 字*" -or $msgText -notlike "*採用自備中譯*") { $fails += "⑭：結果訊息未含「已加入 2 字」與「採用自備中譯」（實得「$msgText」）" }
+    $rr = Read-ResultWindow $msg
+    Write-Host "* ⑭ 結果視窗：Title「$($rr.Title)」標頭「$($rr.Header)」內文「$($rr.Body)」"
+    if ($rr.Body -notlike "*已加入 2 字*" -or $rr.Body -notlike "*採用自備中譯*") { $fails += "⑭：結果視窗未含「已加入 2 字」與「採用自備中譯」（實得「$($rr.Body)」）" }
+    if ($rr.Header -ne "匯入完成" -or $rr.Title -ne "匯入清單：完成") { $fails += "⑭：結果視窗標頭／標題「$($rr.Header)」／「$($rr.Title)」≠「匯入完成」／「匯入清單：完成」" }
     Save-WindowShot -Hwnd ([IntPtr]$msg.Current.NativeWindowHandle) -Path (Join-Path $OutDir "09-own-result.png")
-    $ok = @($msg.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Button))) | Where-Object { $_.Current.Name -in @("OK", "確定") }) | Select-Object -First 1
-    if ($null -ne $ok) { Invoke-El $ok; Start-Sleep -Milliseconds 600 }
+    Close-ResultWindow $msg
   }
   $aiWin = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "*正在匯入*" -ExcludeHwnd $hwnd -TimeoutSec 1
   if ($null -ne $aiWin) { $fails += "⑭：全自備卻開了 AI 動作確認頁（正在匯入…）" }
@@ -805,6 +892,127 @@ try {
   if ($fails.Count -eq 0) { Write-Host "* [OK] ⑫–⑭ 自備中譯：中譯來源欄、整批切換、全自備零查詢寫入皆符" -ForegroundColor Green }
   #endregion
 
+  #region O.#322 ⑮ 背景執行：非模態、進度與剩餘時間、筆記頁整份寫回不覆蓋、結果視窗 --------------------------------
+  Write-Host "## O.#322 ⑮ 背景執行 --------------------------------" -ForegroundColor Cyan
+  Start-BackgroundImport -Path $unit6Path -N 8 -Tag "⑮"
+  Start-Sleep -Milliseconds 1500
+  if ($null -ne (Wait-Confirm -TimeoutSec 1)) { $fails += "⑮：實按後確認頁仍開著" }
+  if ($null -ne (Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "*正在匯入*" -ExcludeHwnd $hwnd -TimeoutSec 1)) { $fails += "⑮：背景執行卻開了模態 AI 動作頁" }
+  $pt15 = Get-ProgressText
+  Write-Host "* ⑮ 進度列＝「$pt15」"
+  if ($pt15 -notlike "*已完成*" -or $pt15 -notlike "*／8*") { $fails += "⑮：進度列未顯示「已完成 n／8」（實得「$pt15」）" }
+  # 非模態：切歷史再切回筆記（切回會整頁重載）
+  if (-not (Switch-Tab -Root $root -TabId "TabHistory" -Hwnd $hwnd)) { $fails += "⑮：匯入期間切不到歷史分頁——主視窗被鎖住" }
+  $ptHist = Get-ProgressText
+  if ($ptHist -notlike "*已完成*") { $fails += "⑮：切到歷史分頁後進度列不見了（實得「$ptHist」）" }
+  if (-not (Switch-Tab -Root $root -TabId "TabNotes" -Hwnd $hwnd)) { $fails += "⑮：匯入期間切不回筆記分頁" }
+  $d0 = Get-ProgressDone
+  $d1 = Wait-ProgressDone -AtLeast ($d0 + 1) -TimeoutSec 10   # 切回之後又有匯入寫入——筆記頁須靠同步才有新字
+  Write-Host "* ⑮ 切回筆記後已完成 $d0 → $d1"
+  if ($d1 -le $d0) { $notes += "⑮：切回後等不到新寫入（$d0→$d1），排序覆蓋之斷言強度降低" }
+  $alpha = Find-ByAutomationId -Root $root -Id "AlphaSortBtn"
+  if ($null -eq $alpha) { $fails += "⑮：找不到「字母」排序鈕" } else { Invoke-El $alpha; Write-Host "* ⑮ 已按「字母」排序（筆記頁整份寫回）" }
+  # 剩餘時間出現（滿 2 筆）→ 手冊圖
+  $etaEnd = (Get-Date).AddSeconds(10); $ptEta = ""
+  while ((Get-Date) -lt $etaEnd -and $ptEta -notlike "*約剩*") { $ptEta = Get-ProgressText; Start-Sleep -Milliseconds 250 }
+  Write-Host "* ⑮ 進度列（剩餘時間）＝「$ptEta」"
+  if ($ptEta -notlike "*約剩*") { $fails += "⑮：滿 2 筆後進度列未出現「約剩」（實得「$ptEta」）" }
+  else {
+    Save-WindowShot -Hwnd $hwnd -Path (Join-Path $OutDir "10-background-progress.png")
+    Copy-Item (Join-Path $OutDir "10-background-progress.png") $bgPng -Force
+    Write-Host "* 手冊圖已產出（背景匯入進度列）：$bgPng"
+  }
+  $res15 = Wait-ResultWindow -TimeoutSec 30
+  if ($null -eq $res15) { $fails += "⑮：30 秒內未見結果視窗" }
+  else {
+    $rr = Read-ResultWindow $res15
+    Write-Host "* ⑮ 結果視窗：「$($rr.Title)」／「$($rr.Header)」／「$($rr.Body)」"
+    if ($rr.Header -ne "匯入完成" -or $rr.Body -notlike "匯入完成：已加入 8 字*") { $fails += "⑮：結果視窗未為「匯入完成」「已加入 8 字」（實得「$($rr.Header)」「$($rr.Body)」）" }
+    Save-WindowShot -Hwnd ([IntPtr]$res15.Current.NativeWindowHandle) -Path (Join-Path $OutDir "11-background-result.png")
+    Close-ResultWindow $res15
+  }
+  if ((Get-ProgressText) -ne "") { $fails += "⑮：結束後進度列仍在" }
+  $j = Get-Content (Join-Path $appData "notes.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  $pf = (Get-AllFolders $j.Folders) | Where-Object { $_.Id -eq $probeId } | Select-Object -First 1
+  $got = @(@($pf.Entries) | Where-Object { $bgWords -contains $_.Original })
+  Write-Host "* ⑮ 探針夾內該批字數＝$($got.Count)；中譯樣例＝「$(@($got)[0].Translation)」"
+  if ($got.Count -ne 8) { $fails += "⑮：探針夾內該批字數＝$($got.Count)≠8——筆記頁之整份寫回覆蓋了匯入之字？" }
+  if (@($got | Where-Object { -not $_.Translation.StartsWith("〔測試假查詢〕") }).Count -gt 0) { $fails += "⑮：有字之中譯不是測試縫假查詢結果——疑似走了真查詢" }
+  if ((Get-LedgerBytes).Length -ne $ledgerBefore.Length) { $fails += "⑮：AI 花費帳本有變動（輔證）" }
+  #endregion
+
+  #region P.#322 ⑯ 重入不受理 ＋ ⑰ 取消：已完成者保留、其餘不寫入 --------------------------------
+  Write-Host "## P.#322 ⑯⑰ 重入與取消 --------------------------------" -ForegroundColor Cyan
+  Start-BackgroundImport -Path $unit7Path -N 20 -Tag "⑯"
+  Start-Sleep -Milliseconds 800
+  Set-WindowForeground -Hwnd $hwnd | Out-Null
+  Invoke-El (Find-ByAutomationId -Root $root -Id "NotesImportBtn")
+  $toast16 = ""; $tEnd = (Get-Date).AddSeconds(3)
+  while ((Get-Date) -lt $tEnd -and $toast16 -eq "") { $toast16 = Find-ToastText "已有一批匯入正在進行"; Start-Sleep -Milliseconds 200 }
+  $dlg16 = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "選擇英文清單*" -ExcludeHwnd $hwnd -TimeoutSec 1
+  Write-Host "* ⑯ toast＝「$toast16」／檔案對話框＝$($null -ne $dlg16)"
+  if ($null -ne $dlg16) { $fails += "⑯：匯入執行中再按「匯入清單」卻開了檔案對話框"; [System.Windows.Forms.SendKeys]::SendWait("{ESC}") }
+  if ($toast16 -eq "") { $fails += "⑯：未見 toast「已有一批匯入正在進行」" }
+  $d17 = Wait-ProgressDone -AtLeast 2 -TimeoutSec 15
+  if ($d17 -ge 20 -or $d17 -lt 2) { throw "⑰：已完成數 $d17 不在可取消區間——時序不成立，據實中止" }
+  $cancel = Find-ByAutomationId -Root $root -Id "NotesImportProgressCancel"
+  Invoke-El $cancel
+  Write-Host "* ⑰ 已於已完成 $d17 時按「取消」；進度列＝「$(Get-ProgressText)」"
+  $res17 = Wait-ResultWindow -TimeoutSec 15
+  if ($null -eq $res17) { $fails += "⑰：取消後未見結果視窗" }
+  else {
+    $rr = Read-ResultWindow $res17
+    Write-Host "* ⑰ 結果視窗：「$($rr.Title)」／「$($rr.Header)」／「$($rr.Body)」"
+    if ($rr.Header -ne "匯入已取消" -or $rr.Title -ne "匯入清單：已取消") { $fails += "⑰：結果視窗標頭／標題非「匯入已取消」（實得「$($rr.Header)」「$($rr.Title)」）" }
+    if (-not $rr.Body.StartsWith("匯入已取消：") -or $rr.Body -notlike "*已取消——已加入的字保留*") { $fails += "⑰：結果內文未以「匯入已取消：」起首或未含保留說明" }
+    $mk = [regex]::Match($rr.Body, "已加入 (\d+) 字")
+    $k = if ($mk.Success) { [int]$mk.Groups[1].Value } else { -1 }
+    $onDisk = Count-Words $cancelWords
+    Write-Host "* ⑰ 結果之已加入 k＝$k／notes.json 該批字數＝$onDisk"
+    if ($k -ne $onDisk -or $k -lt 2 -or $k -gt 19) { $fails += "⑰：取消後磁碟字數 $onDisk 與結果 k＝$k 不符或不在 2–19" }
+    else { Write-Host "* [OK] ⑰ 取消：已完成者保留、其餘不寫入" -ForegroundColor Green }
+    Close-ResultWindow $res17
+  }
+  #endregion
+
+  #region Q.#322 ⑱ 匯入中結束 app：確認框、否＝繼續、是＝結束且已加入者保留 --------------------------------
+  Write-Host "## Q.#322 ⑱ 結束確認 --------------------------------" -ForegroundColor Cyan
+  Start-BackgroundImport -Path $unit8Path -N 20 -Tag "⑱"
+  $null = Wait-ProgressDone -AtLeast 1 -TimeoutSec 10
+  [Win32Post]::Close($hwnd) | Out-Null
+  $ask = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "匯入進行中" -ExcludeHwnd $hwnd -TimeoutSec 8
+  if ($null -eq $ask) { throw "⑱：關主視窗後未見確認框（Title 匯入進行中）" }
+  $askText = (@($ask.FindAll($TS::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) -join " ")
+  Write-Host "* ⑱ 確認框＝「$askText」"
+  if ($askText -notlike "*匯入清單還在進行*") { $fails += "⑱：確認框未含「匯入清單還在進行」" }
+  $no = Find-AskButton $ask @("否", "No")
+  if ($null -eq $no) {
+    foreach ($el in $ask.FindAll($TS::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) { Write-Host ("  · [{0}] 「{1}」 pats={2}" -f $el.Current.ControlType.ProgrammaticName, $el.Current.Name, (($el.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ",")) }
+    throw "⑱：確認框找不到「否」"
+  }
+  $dBefore = Get-ProgressDone
+  Press-AskButton $ask $no "⑱"; Start-Sleep -Milliseconds 600
+  $alive = -not (Get-Process -Id $app.ProcessId -ErrorAction SilentlyContinue).HasExited
+  $dAfter = Wait-ProgressDone -AtLeast ($dBefore + 1) -TimeoutSec 6
+  Write-Host "* ⑱ 按「否」後：行程存活＝$alive／已完成 $dBefore → $dAfter"
+  if (-not $alive) { $fails += "⑱：按「否」後程式仍結束了" }
+  if ($dAfter -le $dBefore) { $fails += "⑱：按「否」後匯入未續進" }
+  [Win32Post]::Close($hwnd) | Out-Null
+  $ask = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "匯入進行中" -ExcludeHwnd $hwnd -TimeoutSec 8
+  if ($null -eq $ask) { throw "⑱：第二次關主視窗後未見確認框" }
+  $yes = Find-AskButton $ask @("是", "Yes")
+  if ($null -eq $yes) { throw "⑱：確認框找不到「是」" }
+  Press-AskButton $ask $yes "⑱"
+  $proc = Get-Process -Id $app.ProcessId -ErrorAction SilentlyContinue
+  $exited = if ($null -eq $proc) { $true } else { $proc.WaitForExit(10000) }
+  $k18 = Count-Words $exitWords
+  Write-Host "* ⑱ 按「是」後：行程結束＝$exited／notes.json 該批字數＝$k18"
+  if (-not $exited) { $fails += "⑱：按「是」後 10 秒內程式未結束" }
+  if ($k18 -lt 1 -or $k18 -gt 19) { $fails += "⑱：結束後該批字數 $k18 不在 1–19（已加入者應保留、其餘不加入）" }
+  elseif ($exited) { Write-Host "* [OK] ⑱ 結束確認：否＝繼續、是＝結束且已加入者保留" -ForegroundColor Green }
+  if ((Get-LedgerBytes).Length -ne $ledgerBefore.Length) { $fails += "⑱：AI 花費帳本有變動（輔證）" }
+  #endregion
+
 }
 finally {
   #region F.收尾：關程式並還原 APPDATA --------------------------------
@@ -812,6 +1020,7 @@ finally {
   Get-Process -Name "LingoIsland" -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(5000) }
   Start-Sleep -Milliseconds 500
   $env:OPENAI_API_KEY = $origApiKey   # #321：還原本行程之金鑰環境變數
+  $env:LINGOISLAND_IMPORT_FAKE_LOOKUP_MS = $origFakeMs   # #322：還原測試縫
   if (Test-Path $backupDir) {
     Remove-Item -Path $appData -Recurse -Force -ErrorAction SilentlyContinue
     Copy-Item -Path $backupDir -Destination $appData -Recurse -Force
@@ -831,6 +1040,6 @@ if ($fails.Count -gt 0) {
   $fails | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
   exit 1
 }
-Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪、#321 ⑫–⑭ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
+Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪、#321 ⑫–⑭、#322 ⑮–⑱ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
 exit 0
 #endregion
