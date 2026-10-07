@@ -46,6 +46,7 @@ public partial class NotesImportWindow : Window
         var excludedText = NotesImport.ExcludedText(excluded);
         ExcludedText.Text = excludedText;
         ExcludedText.Visibility = excludedText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (excluded.Count > NotesImport.MaxExcludedShown) { ExcludedText.ToolTip = NotesImport.ExcludedFullText(excluded); }
         SummaryText.Text = NotesImport.SummaryText(entries, multiSource: sources.Count >= 2);
         // 拖放入口放下當下前景仍是檔案總管：前景鎖可能使 Activate 只閃工作列，故切一次 Topmost 保證疊在最上層可見（#320）
         Loaded += (_, _) => { Topmost = true; Topmost = false; Activate(); };
@@ -78,7 +79,7 @@ public partial class NotesImportWindow : Window
             IsEnabled = e.IsSelectable,
             Margin = new Thickness(10, 4, 0, 4),
             VerticalAlignment = VerticalAlignment.Center,
-            ToolTip = e.IsSelectable ? null : "檔內重複的字只留第一筆，不能另外勾選",
+            ToolTip = e.IsSelectable ? null : "重複的字只留第一筆（" + NotesImport.StatusText(e) + "），不能另外勾選",
         };
         AutomationProperties.SetAutomationId(box, RowAutomationIdPrefix + index);
         AutomationProperties.SetName(box, e.Text);

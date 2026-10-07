@@ -135,9 +135,59 @@ public class NotesImportMultiTests
     [Fact]
     public void Load_ReadThrows_ExcludedAsUnreadable()
     {
-        var r = NotesImport.LoadSources(new[] { @"C:\w\locked.txt" }, _ => 5, _ => throw new IOException("被鎖住"));
+        var r = NotesImport.LoadSources(new[] { @"C:\w\locked.txt" }, _ => 5, _ => throw new IOException("The process cannot access the file because it is being used by another process."));
         Assert.Empty(r.Sources);
-        Assert.Equal("讀不到：被鎖住", r.Excluded.Single().Reason);
+        Assert.Equal("讀不到：被其他程式開著或鎖住（例如 Excel），請關閉後再試", r.Excluded.Single().Reason); // 不露英文例外與完整路徑
+    }
+
+    [Fact]
+    public void ReasonOf_MapsCommonExceptionsToShortChinese()
+    {
+        Assert.StartsWith("找不到", NotesImport.ReasonOf(new FileNotFoundException("x")));
+        Assert.StartsWith("找不到", NotesImport.ReasonOf(new DirectoryNotFoundException("x")));
+        Assert.Equal("沒有讀取權限", NotesImport.ReasonOf(new UnauthorizedAccessException("x")));
+        Assert.Equal("其他", NotesImport.ReasonOf(new InvalidOperationException("其他")));
+    }
+
+    [Fact]
+    public void UniqueDisplayNames_ParentClashOrDriveRoot_FallsBackToFullPath_AlwaysDistinct()
+    {
+        var paths = new[] { @"C:\A\x\list.txt", @"D:\B\x\list.txt", @"E:\list.txt", @"F:\list.txt", @"C:\w\solo.txt" };
+        var d = NotesImport.UniqueDisplayNames(paths);
+        Assert.Equal("solo.txt", d[@"C:\w\solo.txt"]);
+        Assert.Equal(paths.Length, d.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count()); // 兩兩不同
+        Assert.Equal(@"C:\A\x\list.txt", d[@"C:\A\x\list.txt"]);                                    // 上層夾同名 x、磁碟根無上層 → 完整路徑
+        var two = NotesImport.UniqueDisplayNames(new[] { @"C:\a\w.txt", @"C:\b\w.txt" });
+        Assert.Equal(@"a\w.txt", two[@"C:\a\w.txt"]);
+    }
+
+    [Fact]
+    public void Load_SameDisplayCollision_CrossFileDuplicateStillLabelledCrossFile()
+    {
+        var f = new Dictionary<string, string> { [@"C:\A\x\list.txt"] = "apple", [@"D:\B\x\list.txt"] = "Apple" };
+        var r = Load(f);
+        var scan = NotesImport.ScanSources(r.Sources, _ => null);
+        Assert.StartsWith("與「", NotesImport.StatusText(scan.Entries[1]));                         // 不被誤標成「檔內重複」
+    }
+
+    [Fact]
+    public void Split_Shortcut_GetsSpecificReason()
+    {
+        var (_, rej) = NotesImport.SplitByExtension(new[] { @"C:\w\words.TXT.lnk" }, _ => false);
+        Assert.Equal("是捷徑（請拖入原檔）", rej.Single().Reason);
+    }
+
+    [Fact]
+    public void ExcludedText_TruncatesAfterFive_FullTextHasAll()
+    {
+        var many = Enumerable.Range(1, 300).Select(i => new NotesImportExcluded($"img{i}.png", NotesImportExcludeKind.NotListFile, "不是 .txt／.csv")).ToList();
+        var text = NotesImport.ExcludedText(many);
+        Assert.Equal(NotesImport.MaxExcludedShown, Regex.Matches(text, "img").Count);
+        Assert.EndsWith("…等 300 個（滑鼠停著看全部）", text);
+        Assert.Equal(300, NotesImport.ExcludedFullText(many).Split('\n').Length);
+        var msg = NotesImport.AllUnusableText(many, 0);
+        Assert.Equal(10, Regex.Matches(msg, "· ").Count);
+        Assert.EndsWith("…等 300 個", msg);
     }
 
     [Fact]
@@ -191,14 +241,15 @@ public class NotesImportMultiTests
     }
 
     [Fact]
-    public void ScanSources_SingleSource_EquivalentToScan()
+    public void ScanSources_SingleSource_KeepsV416LinesAndEmptyTexts()
     {
-        var lines = new[] { "apple", "banana", "Apple" };
-        Func<string, string?> f = k => k == "banana" ? "Unit 3" : null;
-        var a = NotesImport.Scan(lines, f);
-        var b = NotesImport.ScanSources(new[] { new NotesImportSource("", "", lines) }, f);
-        Assert.Equal(a.Entries, b.Entries);
-        Assert.Equal(a.Error, b.Error);
+        var tooMany = NotesImport.ScanSources(new[] { Src("a.txt", Enumerable.Repeat("apple", NotesImport.MaxLines + 1).ToArray()) }, _ => null);
+        Assert.Equal($"這份清單超過 {NotesImport.MaxLines} 行（含重複），不像單字清單——請確認是否選錯檔、或拆成幾份再匯入。", tooMany.Error);
+        var empty = NotesImport.ScanSources(new[] { Src("a.txt", "  ", "") }, _ => null);
+        Assert.Equal("檔案裡沒有任何可匯入的字——每行一個英文單字或片語（csv 只取第一欄），空行會被忽略。", empty.Error);
+        var dup = NotesImport.ScanSources(new[] { Src("a.txt", "apple", "Apple") }, _ => null);
+        Assert.Equal("檔內重複（只留第一筆）", NotesImport.StatusText(dup.Entries[1]));
+        Assert.Equal("共 2 列：新字 1、已在筆記 0、檔內重複 1", NotesImport.SummaryText(dup.Entries));
     }
 
     [Fact]

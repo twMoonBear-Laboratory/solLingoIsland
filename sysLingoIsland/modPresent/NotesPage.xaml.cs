@@ -244,7 +244,8 @@ public partial class NotesPage : UserControl
             {
                 Data = e.Data,
                 Paths = paths,
-                AcceptedCount = NotesImport.SplitByExtension(paths, System.IO.Directory.Exists).Accepted.Count, // 只在進入時算一次
+                // 只在進入時算一次、且只看副檔名——OLE 回呼內不碰磁碟（離線網路磁碟之 Directory.Exists 可卡數秒）；資料夾判定留給 BeginImportFiles
+                AcceptedCount = NotesImport.SplitByExtension(paths, _ => false).Accepted.Count,
             };
         }
         return _fileDrag;

@@ -236,6 +236,7 @@ public static class NotesImport
             if (string.IsNullOrWhiteSpace(p)) { continue; }
             var name = Path.GetFileName(p.TrimEnd('\\', '/'));
             if (isDirectory(p)) { rejected.Add(new NotesImportExcluded(name, NotesImportExcludeKind.Folder, "是資料夾（請拖入裡面的 .txt／.csv）")); }
+            else if (string.Equals(Path.GetExtension(p), ".lnk", StringComparison.OrdinalIgnoreCase)) { rejected.Add(new NotesImportExcluded(name, NotesImportExcludeKind.NotListFile, "是捷徑（請拖入原檔）")); }
             else if (!IsListFile(p)) { rejected.Add(new NotesImportExcluded(name, NotesImportExcludeKind.NotListFile, "不是 .txt／.csv")); }
             else { accepted.Add(p); }
         }
@@ -257,15 +258,8 @@ public static class NotesImport
             .OrderBy(p => Path.GetFileName(p), Comparer<string>.Create(NotesStore.NaturalCompare))
             .ThenBy(p => p, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var dupNames = paths.GroupBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
-            .Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        string Display(string p)
-        {
-            var name = Path.GetFileName(p);
-            if (!dupNames.Contains(name)) { return name; }
-            var parent = Path.GetFileName(Path.GetDirectoryName(p) ?? "");
-            return parent.Length > 0 ? parent + "\\" + name : name;
-        }
+        var displays = UniqueDisplayNames(paths);
+        string Display(string p) => displays[p];
 
         var excluded = new List<NotesImportExcluded>();
         var sized = new List<string>();
@@ -273,7 +267,7 @@ public static class NotesImport
         foreach (var p in paths)
         {
             try { total += length(p); sized.Add(p); }
-            catch (Exception ex) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Unreadable, "讀不到：" + ex.Message)); }
+            catch (Exception ex) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Unreadable, "讀不到：" + ReasonOf(ex))); }
         }
         if (total > MaxFileBytes)
         {
@@ -288,7 +282,7 @@ public static class NotesImport
         {
             string content;
             try { content = read(p); }
-            catch (Exception ex) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Unreadable, "讀不到：" + ex.Message)); continue; }
+            catch (Exception ex) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Unreadable, "讀不到：" + ReasonOf(ex))); continue; }
             if (LooksMisdecoded(content)) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Misdecoded, "疑似不是 UTF-8 編碼")); continue; }
             var lines = ParseLines(content, IsCsv(p));
             if (lines.Count == 0) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Empty, "沒有可匯入的字")); continue; }
@@ -313,13 +307,52 @@ public static class NotesImport
                 _ => $"{only.FileName}（{only.Reason}）",
             };
         }
+        const int show = 10; // 數百檔時不讓對話框超出螢幕
         return "沒有可以匯入的檔——只接受 .txt（每行一字）與 .csv（取第一欄）：\n"
-               + string.Join("\n", excluded.Select(x => $"· {x.FileName}（{x.Reason}）"));
+               + string.Join("\n", excluded.Take(show).Select(x => $"· {x.FileName}（{x.Reason}）"))
+               + (excluded.Count > show ? $"\n…等 {excluded.Count} 個" : "");
     }
 
-    /// <summary>確認頁「未納入」一行（#320，純函式）：無則空字串（不顯示）。</summary>
+    /// <summary>「未納入」行與中止訊息最多列幾檔（其餘以「…等 N 個」收尾，避免數百檔把確認表擠沒）。</summary>
+    public const int MaxExcludedShown = 5;
+
+    /// <summary>確認頁「未納入」一行（#320，純函式）：無則空字串（不顯示）；逾 <see cref="MaxExcludedShown"/> 檔截斷（完整清單見 <see cref="ExcludedFullText"/>）。</summary>
     public static string ExcludedText(IReadOnlyList<NotesImportExcluded> excluded)
-        => excluded.Count == 0 ? "" : "未納入：" + string.Join("；", excluded.Select(x => $"{x.FileName}（{x.Reason}）"));
+        => excluded.Count == 0 ? "" : "未納入：" + string.Join("；", excluded.Take(MaxExcludedShown).Select(x => $"{x.FileName}（{x.Reason}）"))
+           + (excluded.Count > MaxExcludedShown ? $"…等 {excluded.Count} 個（滑鼠停著看全部）" : "");
+
+    /// <summary>「未納入」完整清單（ToolTip 用）。</summary>
+    public static string ExcludedFullText(IReadOnlyList<NotesImportExcluded> excluded)
+        => string.Join("\n", excluded.Select(x => $"{x.FileName}（{x.Reason}）"));
+
+    /// <summary>讀檔例外之白話原因（#320）：常見者對應短中文，其餘沿用例外訊息。</summary>
+    public static string ReasonOf(Exception ex) => ex switch
+    {
+        FileNotFoundException or DirectoryNotFoundException => "找不到這個檔（可能已被移動或刪除）",
+        UnauthorizedAccessException => "沒有讀取權限",
+        IOException => "被其他程式開著或鎖住（例如 Excel），請關閉後再試",
+        _ => ex.Message,
+    };
+
+    /// <summary>
+    /// 來源顯示名（#320，純函式）：預設檔名；同名者附上層夾（`上層\檔名`），仍撞名（上層夾也同名或在磁碟根）則用完整路徑——保證兩兩不同。
+    /// </summary>
+    public static Dictionary<string, string> UniqueDisplayNames(IReadOnlyList<string> paths)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var g in paths.GroupBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase))
+        {
+            if (g.Count() == 1) { result[g.First()] = g.Key; continue; }
+            var withParent = g.ToDictionary(p => p, p =>
+            {
+                var parent = Path.GetFileName(Path.GetDirectoryName(p) ?? "");
+                return parent.Length > 0 ? parent + "\\" + Path.GetFileName(p) : p;
+            }, StringComparer.OrdinalIgnoreCase);
+            var clash = withParent.Values.GroupBy(v => v, StringComparer.OrdinalIgnoreCase).Any(x => x.Count() > 1);
+            foreach (var p in g) { result[p] = clash ? p : withParent[p]; }
+        }
+        return result;
+    }
 
     /// <summary>確認頁首行之來源摘要（#320，純函式）：1 檔＝檔名；多檔＝「N 個檔（a、b…）」，逾 5 檔列前 5 個加「…等 N 個」。</summary>
     public static string SourcesText(IReadOnlyList<string> names)
