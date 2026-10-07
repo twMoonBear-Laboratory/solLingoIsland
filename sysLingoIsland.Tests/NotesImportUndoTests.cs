@@ -222,6 +222,8 @@ public class NotesImportUndoTests
         Assert.Equal("已撤銷本次匯入：移除 2 字、還原 1 字（跳過 1 字）", NotesImportUndoText.Toast(p));
         Assert.Equal("已撤銷本次匯入：移除 2 字、還原 0 字", NotesImportUndoText.Toast(PlanOf(2, 0)));
         Assert.Equal("這次匯入的 3 字在匯入後都已修改、移動或刪除，沒有可撤銷的字。", NotesImportUndoText.NothingText(3));
+        Assert.Equal("這次匯入的 2 字在匯入後都已修改、移動或刪除，沒有可撤銷的字。", NotesImportUndoText.NothingText(PlanOf(0, 0, "a", "b")));
+        Assert.Equal("這次匯入更新的字，內容與匯入前相同，沒有需要撤銷的變更。", NotesImportUndoText.NothingText(PlanOf(0, 0)));
     }
 
     // ---- 撤銷狀態四態 ----

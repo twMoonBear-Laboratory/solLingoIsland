@@ -697,7 +697,7 @@ public partial class App : System.Windows.Application
         if (!trial.HasChange)
         {
             m.MarkNothingToUndo();
-            UndoInfo(owner, NotesImportUndoText.NothingText(m.EntryCount));
+            UndoInfo(owner, NotesImportUndoText.NothingText(trial));
             return;
         }
         var answer = System.Windows.MessageBox.Show(owner, NotesImportUndoText.ConfirmText(trial), NotesImportUndoText.DialogTitle,
@@ -716,7 +716,7 @@ public partial class App : System.Windows.Application
         if (!plan.HasChange)
         {
             m.MarkNothingToUndo();
-            UndoInfo(owner, NotesImportUndoText.NothingText(m.EntryCount));
+            UndoInfo(owner, NotesImportUndoText.NothingText(plan));
             return;
         }
         _notesPage?.SyncAfterUndoWrite(); // ⑥：同一呼叫內同步筆記頁——其後筆記頁之整份存檔不會把撤銷蓋回

@@ -34,9 +34,6 @@ public sealed class NotesImportLastResult
     /// <summary>撤銷鈕是否可按。</summary>
     public bool CanUndo => State == NotesImportUndoState.Available;
 
-    /// <summary>合併後之條目數（＝新增＋更新；⑦ 之 n）。</summary>
-    public int EntryCount => NoteImportUndo.Merge(Journal).Count;
-
     /// <summary>下一批開始（③）：可撤→已失效；其餘不變。</summary>
     public void Expire() => Move(NotesImportUndoState.Expired);
 
@@ -90,6 +87,10 @@ public static class NotesImportUndoText
 
     /// <summary>全部跳過（⑦）。</summary>
     public static string NothingText(int n) => $"這次匯入的 {n} 字在匯入後都已修改、移動或刪除，沒有可撤銷的字。";
+
+    /// <summary>全部跳過或無須還原（⑦）：n＝跳過數；無跳過（皆為覆寫前後相同之更新）時另一句。</summary>
+    public static string NothingText(NoteUndoPlan plan)
+        => plan.Skipped > 0 ? NothingText(plan.Skipped) : "這次匯入更新的字，內容與匯入前相同，沒有需要撤銷的變更。";
 
     /// <summary>存檔失敗（⑤）。</summary>
     public static string SaveFailedText(string reason) => $"筆記存檔失敗（{reason}），這次沒有撤銷任何字。";
