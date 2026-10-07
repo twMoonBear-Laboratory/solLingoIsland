@@ -1,79 +1,86 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480" font-family="Segoe UI, Microsoft JhengHei, PingFang TC, system-ui, sans-serif">
-  <!-- [modHmi筆記匯入確認頁]：NotesImportWindow（Title「匯入清單」、約 520×440、ShowDialog、Owner＝主視窗、CenterOwner）。spec#14／#309。設計期參考稿、以文字為準。 -->
-  <rect width="640" height="480" fill="#FFF0F5"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="500" viewBox="0 0 680 500" font-family="Segoe UI, Microsoft JhengHei, PingFang TC, system-ui, sans-serif">
+  <!-- [modHmi筆記匯入確認頁]：NotesImportWindow（Title「匯入清單」、約 640×460、ShowDialog、Owner＝主視窗、CenterOwner）。spec#14／#309；#320 多檔：來源欄、首行列檔數、未納入行。設計期參考稿、以文字為準。 -->
+  <rect width="680" height="500" fill="#FFF0F5"/>
 
   <!-- owner 視窗（模態期間不可操作，以淡化示意）：主視窗『筆記』分頁 -->
   <g opacity="0.35">
-    <rect x="0" y="0" width="640" height="26" fill="#F4C2D0"/>
+    <rect x="0" y="0" width="680" height="26" fill="#F4C2D0"/>
     <text x="10" y="18" font-size="12" font-weight="600" fill="#5C3346">LingoIsland — 筆記</text>
-    <rect x="0" y="26" width="640" height="52" fill="#FBE4EC"/>
+    <rect x="0" y="26" width="680" height="52" fill="#FBE4EC"/>
     <text x="20" y="58" font-size="12" fill="#8A5A6D">主題　擷取　影片　電子書　筆記　歷史　選項　關於</text>
-    <rect x="10" y="88" width="180" height="336" rx="8" fill="#FFFFFF" stroke="#F4C2D0"/>
+    <rect x="10" y="88" width="180" height="356" rx="8" fill="#FFFFFF" stroke="#F4C2D0"/>
     <text x="22" y="110" font-size="12" fill="#8A5A6D">＋ 新增資料夾　匯入清單</text>
     <text x="22" y="134" font-size="12" fill="#8A5A6D">▸ My Notes</text>
-    <text x="22" y="154" font-size="12" font-weight="600" fill="#8A5A6D">▾ Unit 3 生詞</text>
-    <rect x="200" y="88" width="430" height="336" rx="8" fill="#FFFFFF" stroke="#F4C2D0"/>
+    <text x="22" y="154" font-size="12" font-weight="600" fill="#8A5A6D">▾ 第一冊生詞</text>
+    <rect x="200" y="88" width="470" height="356" rx="8" fill="#FFFFFF" stroke="#F4C2D0"/>
     <text x="212" y="110" font-size="12" fill="#8A5A6D">字母　日期　自訂　清除練習紀錄</text>
-    <rect x="0" y="432" width="640" height="26" fill="#FBE4EC"/>
+    <rect x="0" y="452" width="680" height="26" fill="#FBE4EC"/>
   </g>
-  <rect x="0" y="0" width="640" height="480" fill="#000000" opacity="0.10"/>
+  <rect x="0" y="0" width="680" height="500" fill="#000000" opacity="0.10"/>
 
-  <!-- 模態對話視窗（CenterOwner） -->
-  <!-- 對話框 520×440（示意圖縮放 520×400 以容於 640×480 畫布；尺寸以文字為準） -->
-  <rect x="60" y="40" width="520" height="400" rx="10" fill="#FFFFFF" stroke="#D98FAE" stroke-width="1.5"/>
-  <rect x="60" y="40" width="520" height="28" rx="10" fill="#F4C2D0"/>
-  <text x="74" y="59" font-size="13" font-weight="600" fill="#5C3346">匯入清單</text>
-  <text x="562" y="59" font-size="12" fill="#5C3346">✕</text>
+  <!-- 模態對話視窗（CenterOwner）：640×460（示意縮放 620×440） -->
+  <rect x="30" y="30" width="620" height="440" rx="10" fill="#FFFFFF" stroke="#D98FAE" stroke-width="1.5"/>
+  <rect x="30" y="30" width="620" height="28" rx="10" fill="#F4C2D0"/>
+  <text x="44" y="49" font-size="13" font-weight="600" fill="#5C3346">匯入清單</text>
+  <text x="632" y="49" font-size="12" fill="#5C3346">✕</text>
 
-  <!-- 來源與目標 -->
-  <text x="76" y="92" font-size="12" fill="#5C3346">來源：<tspan font-weight="600">unit3-words.txt</tspan>　→　目標資料夾：<tspan font-weight="600">Unit 3 生詞</tspan></text>
+  <!-- 來源與目標（多檔） -->
+  <text x="46" y="82" font-size="12" fill="#5C3346">來源：2 個檔（<tspan font-weight="600">unit1.txt、unit2.csv</tspan>）　→　目標資料夾：<tspan font-weight="600">第一冊生詞</tspan></text>
+  <!-- 未納入（有才顯示） -->
+  <text x="46" y="102" font-size="11" fill="#A06A20">未納入：notes.docx（不是 .txt／.csv）；old.txt（疑似不是 UTF-8 編碼）</text>
 
   <!-- 表上方：全選新字／全不選 -->
-  <rect x="76" y="104" width="78" height="22" rx="11" fill="#FBE4EC" stroke="#E8A9C0"/>
-  <text x="115" y="119" font-size="11" text-anchor="middle" fill="#5C3346">全選新字</text>
-  <rect x="162" y="104" width="62" height="22" rx="11" fill="#FBE4EC" stroke="#E8A9C0"/>
-  <text x="193" y="119" font-size="11" text-anchor="middle" fill="#5C3346">全不選</text>
-  <text x="564" y="119" font-size="11" text-anchor="end" fill="#8A5A6D">共 5 列：新字 3、已在筆記 1、檔內重複 1</text>
+  <rect x="46" y="112" width="78" height="22" rx="11" fill="#FBE4EC" stroke="#E8A9C0"/>
+  <text x="85" y="127" font-size="11" text-anchor="middle" fill="#5C3346">全選新字</text>
+  <rect x="132" y="112" width="62" height="22" rx="11" fill="#FBE4EC" stroke="#E8A9C0"/>
+  <text x="163" y="127" font-size="11" text-anchor="middle" fill="#5C3346">全不選</text>
+  <text x="634" y="127" font-size="11" text-anchor="end" fill="#8A5A6D">共 5 列：新字 3、已在筆記 1、重複 1</text>
 
-  <!-- 彙總確認表 -->
-  <rect x="76" y="134" width="488" height="214" rx="6" fill="#FFFFFF" stroke="#E8A9C0"/>
-  <rect x="76" y="134" width="488" height="24" rx="6" fill="#FBE4EC"/>
-  <text x="90" y="150" font-size="11" fill="#5C3346">勾</text>
-  <text x="124" y="150" font-size="11" fill="#5C3346">單字／片語</text>
-  <text x="400" y="150" font-size="11" fill="#5C3346">狀態</text>
+  <!-- 彙總確認表：勾｜單字／片語｜來源｜狀態 -->
+  <rect x="46" y="142" width="588" height="222" rx="6" fill="#FFFFFF" stroke="#E8A9C0"/>
+  <rect x="46" y="142" width="588" height="24" rx="6" fill="#FBE4EC"/>
+  <text x="60" y="158" font-size="11" fill="#5C3346">勾</text>
+  <text x="94" y="158" font-size="11" fill="#5C3346">單字／片語</text>
+  <text x="270" y="158" font-size="11" fill="#5C3346">來源</text>
+  <text x="380" y="158" font-size="11" fill="#5C3346">狀態</text>
 
-  <!-- 列 1：新字（預設勾） -->
-  <rect x="86" y="167" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
-  <text x="88" y="177" font-size="10" fill="#FFFFFF">✓</text>
-  <text x="124" y="178" font-size="12" fill="#333">apple</text>
-  <text x="400" y="178" font-size="11" fill="#4A7A4A">新字</text>
-  <!-- 列 2：已在筆記（預設不勾） -->
-  <rect x="86" y="197" width="12" height="12" rx="2" fill="#FFFFFF" stroke="#999"/>
-  <text x="124" y="208" font-size="12" fill="#777">banana</text>
-  <text x="400" y="208" font-size="11" fill="#A06A20">已在筆記（預設略過；勾選＝重新查詢更新原筆）</text>
-  <!-- 列 3：新字 -->
-  <rect x="86" y="227" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
-  <text x="88" y="237" font-size="10" fill="#FFFFFF">✓</text>
-  <text x="124" y="238" font-size="12" fill="#333">cherry</text>
-  <text x="400" y="238" font-size="11" fill="#4A7A4A">新字</text>
-  <!-- 列 4：檔內重複（預設不勾） -->
-  <rect x="86" y="257" width="12" height="12" rx="2" fill="#EEEEEE" stroke="#CCCCCC"/>
-  <text x="124" y="268" font-size="12" fill="#AAAAAA">Cherry</text>
-  <text x="400" y="268" font-size="11" fill="#A06A20">檔內重複（只留第一筆）</text>
-  <!-- 列 5：新字（片語） -->
-  <rect x="86" y="287" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
-  <text x="88" y="297" font-size="10" fill="#FFFFFF">✓</text>
-  <text x="124" y="298" font-size="12" fill="#333">take it easy</text>
-  <text x="400" y="298" font-size="11" fill="#4A7A4A">新字</text>
-  <line x1="76" y1="318" x2="564" y2="318" stroke="#F4C2D0"/>
-  <text x="124" y="336" font-size="11" fill="#AAA">（可捲動；逐列可改選）</text>
+  <!-- 列 1：新字（unit1.txt） -->
+  <rect x="56" y="175" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
+  <text x="58" y="185" font-size="10" fill="#FFFFFF">✓</text>
+  <text x="94" y="186" font-size="12" fill="#333">apple</text>
+  <text x="270" y="186" font-size="11" fill="#8A5A6D">unit1.txt</text>
+  <text x="380" y="186" font-size="11" fill="#4A7A4A">新字</text>
+  <!-- 列 2：已在筆記（unit1.txt，預設不勾） -->
+  <rect x="56" y="205" width="12" height="12" rx="2" fill="#FFFFFF" stroke="#999"/>
+  <text x="94" y="216" font-size="12" fill="#777">banana</text>
+  <text x="270" y="216" font-size="11" fill="#8A5A6D">unit1.txt</text>
+  <text x="380" y="216" font-size="11" fill="#A06A20">已在筆記「第一冊生詞」（預設略過；…）</text>
+  <!-- 列 3：新字（unit1.txt） -->
+  <rect x="56" y="235" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
+  <text x="58" y="245" font-size="10" fill="#FFFFFF">✓</text>
+  <text x="94" y="246" font-size="12" fill="#333">cherry</text>
+  <text x="270" y="246" font-size="11" fill="#8A5A6D">unit1.txt</text>
+  <text x="380" y="246" font-size="11" fill="#4A7A4A">新字</text>
+  <!-- 列 4：跨檔重複（unit2.csv，不勾且停用） -->
+  <rect x="56" y="265" width="12" height="12" rx="2" fill="#EEEEEE" stroke="#CCCCCC"/>
+  <text x="94" y="276" font-size="12" fill="#AAAAAA">Cherry</text>
+  <text x="270" y="276" font-size="11" fill="#8A5A6D">unit2.csv</text>
+  <text x="380" y="276" font-size="11" fill="#A06A20">與「unit1.txt」重複（只留第一筆）</text>
+  <!-- 列 5：新字（片語，unit2.csv） -->
+  <rect x="56" y="295" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
+  <text x="58" y="305" font-size="10" fill="#FFFFFF">✓</text>
+  <text x="94" y="306" font-size="12" fill="#333">take it easy</text>
+  <text x="270" y="306" font-size="11" fill="#8A5A6D">unit2.csv</text>
+  <text x="380" y="306" font-size="11" fill="#4A7A4A">新字</text>
+  <line x1="46" y1="326" x2="634" y2="326" stroke="#F4C2D0"/>
+  <text x="94" y="346" font-size="11" fill="#AAA">（可捲動；逐列可改選；來源欄懸停顯示完整路徑）</text>
 
   <!-- 費用揭露 -->
-  <text x="76" y="374" font-size="11" fill="#8A5A6D">共 <tspan font-weight="600" fill="#5C3346">3</tspan> 次 AI 查詢，將使用你的 OpenAI 金鑰；已在筆記之字不會重複建立。</text>
+  <text x="46" y="392" font-size="11" fill="#8A5A6D">共 <tspan font-weight="600" fill="#5C3346">3</tspan> 次 AI 查詢，將使用你的 OpenAI 金鑰；已在筆記之字不會重複建立。</text>
 
   <!-- 底部按鈕 -->
-  <rect x="340" y="392" width="140" height="30" rx="15" fill="#D64D8A"/>
-  <text x="410" y="412" font-size="12" font-weight="600" text-anchor="middle" fill="#FFFFFF">查詢並加入 3 字</text>
-  <rect x="490" y="392" width="74" height="30" rx="15" fill="#FFFFFF" stroke="#D98FAE"/>
-  <text x="527" y="412" font-size="12" text-anchor="middle" fill="#5C3346">取消</text>
+  <rect x="410" y="414" width="140" height="30" rx="15" fill="#D64D8A"/>
+  <text x="480" y="434" font-size="12" font-weight="600" text-anchor="middle" fill="#FFFFFF">查詢並加入 3 字</text>
+  <rect x="560" y="414" width="74" height="30" rx="15" fill="#FFFFFF" stroke="#D98FAE"/>
+  <text x="597" y="434" font-size="12" text-anchor="middle" fill="#5C3346">取消</text>
 </svg>

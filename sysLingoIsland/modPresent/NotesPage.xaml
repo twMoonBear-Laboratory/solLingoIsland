@@ -1,6 +1,8 @@
 <UserControl x:Class="LingoIsland.Present.NotesPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AllowDrop="True">
+  <!-- #320：整頁接受 .txt／.csv 檔案拖放（Preview 穿隧攔 FileDrop、目標＝目前選取夾）；根 Grid 與 EntryScroll 透明背景使空白處亦可命中 -->
   <UserControl.Resources>
     <!-- 卡片行尾圓形圖示鈕（spec#10）：播音／麥克風同款圓鈕，明示可按；顏色由實體 Background/BorderBrush/Foreground 指定。 -->
     <Style x:Key="RoundIcon" TargetType="Button">
@@ -30,7 +32,7 @@
       </Setter>
     </Style>
   </UserControl.Resources>
-  <Grid>
+  <Grid Background="Transparent">
     <!-- 左側欄寬可拖拉調整（Issue #58）：GridSplitter 於中間 Auto 欄 -->
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="212" MinWidth="150"/>
@@ -51,7 +53,7 @@
         <Button x:Name="ImportListBtn" Content="匯入清單" Style="{StaticResource GhostButton}"
                 AutomationProperties.AutomationId="NotesImportBtn"
                 HorizontalAlignment="Left" Padding="10,4"
-                ToolTip="把 .txt（每行一字）或 .csv（取第一欄）的英文清單匯入目前選取的資料夾——先選左側資料夾再按；匯入前會先列出確認表"/>
+                ToolTip="把 .txt（每行一字）或 .csv（取第一欄）的英文清單匯入目前選取的資料夾——先選左側資料夾再按；可多選，也可把檔案直接拖進本頁；匯入前會先列出確認表"/>
       </WrapPanel>
       <Border Grid.Row="1" Style="{StaticResource Card}">
         <!-- USR：長資料夾名自動分行——停用水平捲軸使列寬受欄寬約束（配合 MakeItem 列拉伸＋名稱 TextWrapping） -->
@@ -82,13 +84,20 @@
                 Foreground="#8A2B2B" Style="{StaticResource GhostButton}" Margin="0,0,0,4"/>
       </WrapPanel>
       <Grid Grid.Row="1">
-        <ScrollViewer x:Name="EntryScroll" VerticalScrollBarVisibility="Auto" Padding="8,0,4,0">
+        <ScrollViewer x:Name="EntryScroll" VerticalScrollBarVisibility="Auto" Padding="8,0,4,0" Background="Transparent">
           <StackPanel x:Name="EntryPanel"/>
         </ScrollViewer>
         <TextBlock x:Name="EmptyHint" Text="此資料夾尚無筆記。在查詢結果或歷史條目上使用「加入我的筆記」即可儲存；在左側資料夾按右鍵可管理，拖曳即可移動。"
                    Foreground="#9A6A82" FontSize="13" TextWrapping="Wrap" MaxWidth="320"
                    TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
       </Grid>
+      <!-- #320：檔案拖曳中之目標夾橫幅（覆蓋層、不擠動版面、不攔命中） -->
+      <Border x:Name="DropBanner" Grid.Row="0" Grid.RowSpan="2" Panel.ZIndex="10" VerticalAlignment="Top"
+              Background="#F2FFFFFF" BorderBrush="#B0578D" BorderThickness="1.5" CornerRadius="8"
+              Padding="12,8" Margin="0,0,0,0" IsHitTestVisible="False" Visibility="Collapsed">
+        <TextBlock x:Name="DropBannerText" FontSize="13" FontWeight="SemiBold" Foreground="#8A2B5A" TextWrapping="Wrap"
+                   AutomationProperties.AutomationId="NotesDropBanner"/>
+      </Border>
     </Grid>
   </Grid>
 </UserControl>
