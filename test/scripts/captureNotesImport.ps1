@@ -20,6 +20,13 @@
     ⑨ 緊接 ⑧ 拖入 txt＋docx＋Big5 txt→照常開出、首行單檔格式、「未納入」列兩檔→取消。
     ⑪ 既有拖曳不受影響：按住 apple 卡片握把拖到第二探針夾，notes.json 歸屬改變。
     ⑩ 全程 AI 動作確認頁未出現、兩探針夾條目合計不變。
+
+  #321（CSV 第二欄自備中譯，spec#14 擴充）增走（接在 ⑩ 之後；受測 app 以**無效假金鑰**啟動——萬一誤觸查詢只得 401、不計費）：
+    ⑫ 對話框選 unit5-bilingual.csv（表頭＋grape,葡萄／kiwi,（空白）／"mango","芒果, 熱帶水果"／apple,蘋果）→中譯來源欄、apple 狀態「勾選＝以自備中譯更新」、
+       整批切換存在且未勾、主鈕「加入 3 字（查詢 1 字）」、費用「共 1 次 AI 查詢」「另 2 字採用自備中譯」→手冊圖 notes-import-own-translation.png。
+    ⑬ 勾整批切換→全部「線上查詢」、主鈕「查詢並加入 3 字」→取消勾→還原。
+    ⑭ 先斷言 kiwi 已勾再取消→主鈕「加入 2 字（不查詢）」→實按→結果訊息框「已加入 2 字」「採用自備中譯」→AI 動作頁未出現、帳本不變、
+       notes.json 之 grape／mango 中譯＝自備、音標空、kiwi 未寫入。
   落點被他窗覆蓋即據實中止（不判 PASS）。
 
   查詢並加入之成功／失敗路徑由 NotesImportRunnerTests 以 fake 委派覆蓋（零額度）；本腳本刻意只走到確認頁並取消，不花 OpenAI 額度（USR 常設裁定）。
@@ -62,6 +69,10 @@ Write-Host "# II.參考準備 ================================" -ForegroundColor
   $probe2Id   = "zzzz320320320320320320320320320f"
   $probe2Name = "Unit 4 生詞"
   $manualPng  = Join-Path $repoRoot "docs\manual-assets\notes-import-confirm.png"
+  $unit5Path  = Join-Path $sampleDir "unit5-bilingual.csv"
+  $ownPng     = Join-Path $repoRoot "docs\manual-assets\notes-import-own-translation.png"
+  $sampleOwnWords = @("grape", "kiwi", "mango")   # #321 樣本字：植探針前自全樹移除，免受測者真筆記已有而誤判
+  $origApiKey = $env:OPENAI_API_KEY
   Write-Host "* ExePath = $ExePath"
   Write-Host "* OutDir  = $OutDir"
   Write-Host "* 探針夾＝$probeName（預植 apple／banana）／樣本＝$samplePath"
@@ -229,7 +240,9 @@ public static class MouseDrag
     foreach ($r in $rows) {
       $st = Find-ByAutomationId -Root $Confirm -Id ("NotesImportRow" + $i + "Status")
       $sc = Find-ByAutomationId -Root $Confirm -Id ("NotesImportRow" + $i + "Source")
+      $tr = Find-ByAutomationId -Root $Confirm -Id ("NotesImportRow" + $i + "Translation")
       [pscustomobject]@{
+        Translation = if ($null -eq $tr) { "" } else { $tr.Current.Name }
         Name    = $r.Current.Name
         Checked = ((Toggle-State $r) -eq [System.Windows.Automation.ToggleState]::On)
         Enabled = $r.Current.IsEnabled
@@ -237,6 +250,21 @@ public static class MouseDrag
         Source  = if ($null -eq $sc) { "" } else { $sc.Current.Name }
       }
       $i++
+    }
+  }
+  function Get-CostText {
+    param($Confirm)
+    $t = @($Confirm.FindAll($TS::Descendants,
+        (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Text))) |
+      Where-Object { $_.Current.Name -like "*已在筆記之字不會重複建立*" }) | Select-Object -First 1
+    if ($null -eq $t) { return "" } else { return $t.Current.Name }
+  }
+  function Remove-WordsEverywhere {
+    param($Folders, [string[]]$Words)
+    foreach ($f in @($Folders)) {
+      if ($null -eq $f) { continue }
+      $f.Entries = @(@($f.Entries) | Where-Object { $Words -notcontains $_.Original })
+      Remove-WordsEverywhere $f.Folders $Words
     }
   }
   function Get-HeaderText {
@@ -336,6 +364,7 @@ try {
   $notesJson = Join-Path $appData "notes.json"
   $data = if (Test-Path $notesJson) { Get-Content $notesJson -Raw -Encoding UTF8 | ConvertFrom-Json } else { [pscustomobject]@{ Folders = @() } }
   $data.Folders = @(@($data.Folders) | Where-Object { $_.Id -ne $probeId })
+  Remove-WordsEverywhere $data.Folders $sampleOwnWords   # #321：樣本字不得預先存在（APPDATA 已備份、finally 還原）
   $mkEntry = { param($w) [pscustomobject]@{ Id = ([guid]::NewGuid().ToString("N")); AddedAt = "2026-10-06T00:00:00.0000000+08:00"; Original = $w; Phonetic = "[$w]"; Translation = "譯:$w"; Color = ""; PracticeScore = -1 } }
   $data.Folders = @($data.Folders) + ([pscustomobject]@{
     Id = $probeId; Name = $probeName; Folders = @(); Sort = $null
@@ -350,6 +379,7 @@ try {
   New-Item -ItemType Directory -Path $sampleDir -Force | Out-Null
   [System.IO.File]::WriteAllText($unit4Path, "word`r`ngrape`r`nCHERRY`r`n", (New-Object System.Text.UTF8Encoding($false)))
   [System.IO.File]::WriteAllText($docxPath, "not a word list", (New-Object System.Text.UTF8Encoding($false)))
+  [System.IO.File]::WriteAllText($unit5Path, "word,中文`r`ngrape,葡萄`r`nkiwi,`r`n`"mango`",`"芒果, 熱帶水果`"`r`napple,蘋果`r`n", (New-Object System.Text.UTF8Encoding($true)))
   [System.Text.Encoding]::RegisterProvider([System.Text.CodePagesEncodingProvider]::Instance)
   [System.IO.File]::WriteAllText($big5Path, "apple 蘋果`r`nbanana 香蕉`r`n", [System.Text.Encoding]::GetEncoding(950)) # 含中文才會解出 U+FFFD
   Write-Host "* 已寫 #320 樣本：unit4-words.csv（表頭＋grape＋CHERRY）、notes.docx、old-big5.txt（Big5 含中文）"
@@ -363,6 +393,8 @@ try {
 
   #region B.啟動 App、切筆記頁、選探針夾 --------------------------------
   Write-Host "## B.啟動 App、切筆記頁、選探針夾 --------------------------------" -ForegroundColor Cyan
+  # #321：受測 app 以明顯無效之假金鑰啟動（子行程繼承本行程環境變數）——金鑰預檢照常通過，萬一誤觸查詢也只得 401、不計費；finally 還原
+  $env:OPENAI_API_KEY = "sk-e2e-invalid-placeholder-not-a-real-key-321"
   $app  = Start-AppAndGetWindow -ExePath $ExePath -TimeoutSec 30
   $hwnd = $app.Hwnd
   Set-WindowMaximized -Hwnd $hwnd | Out-Null
@@ -648,12 +680,133 @@ try {
   if ($null -eq $aiWin -and $p1 + $p2 -eq $entriesBefore) { Write-Host "* [OK] ⑩ 全程 0 次 AI 呼叫、條目未增" -ForegroundColor Green }
   #endregion
 
+  #region L.#321 ⑫ 雙語 csv：中譯來源欄、主鈕與費用依線上查詢數 --------------------------------
+  Write-Host "## L.#321 ⑫ 雙語 csv 之確認表 --------------------------------" -ForegroundColor Cyan
+  Set-WindowForeground -Hwnd $hwnd | Out-Null; Start-Sleep -Milliseconds 400
+  # 重新點選探針夾（⑪ 之卡片拖曳後選取夾須仍為「$probeName」，以此保證目標）
+  $tree = Find-ByAutomationId -Root $root -Id "FolderTree"
+  $probeText = @($tree.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Text))) | Where-Object { $_.Current.Name -eq $probeName }) | Select-Object -First 1
+  if ($null -eq $probeText) { throw "⑫：資料夾樹找不到探針夾「$probeName」" }
+  $pr = $probeText.Current.BoundingRectangle
+  if ([Win32Ui]::PidAtPoint([int]($pr.X + 4), [int]($pr.Y + $pr.Height / 2)) -ne [uint32]$app.ProcessId) { throw "⑫：探針夾座標被他窗覆蓋——本輪無法判定，據實中止" }
+  Click-Element -El $probeText; Start-Sleep -Milliseconds 600
+  $importBtn = Find-ByAutomationId -Root $root -Id "NotesImportBtn"
+  Invoke-El $importBtn
+  $fileDlg = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "選擇英文清單*" -ExcludeHwnd $hwnd -TimeoutSec 15
+  if ($null -eq $fileDlg) { throw "⑫：按匯入鈕後未見檔案對話框" }
+  $dlgHwnd = [IntPtr]$fileDlg.Current.NativeWindowHandle
+  [Win32Ui]::ForceForeground($dlgHwnd); Start-Sleep -Milliseconds 500
+  if ([Win32Ui]::GetForegroundWindow() -ne $dlgHwnd) { throw "⑫：檔案對話框未能帶到前景，鍵入會落空" }
+  [System.Windows.Forms.SendKeys]::SendWait("^a"); Start-Sleep -Milliseconds 120
+  [System.Windows.Forms.SendKeys]::SendWait($unit5Path); Start-Sleep -Milliseconds 400
+  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  $confirm = Wait-Confirm -TimeoutSec 15
+  if ($null -eq $confirm) { throw "⑫：選雙語 csv 後未見確認頁" }
+  $rows12 = @(Get-RowSnapshot $confirm)
+  Write-Host "* ⑫ 確認頁列：$(($rows12 | ForEach-Object { "$($_.Name)/$($_.Translation)/$($_.Status)/勾=$($_.Checked)" }) -join '｜')"
+  $expect12 = @(
+    @{ Name = "grape"; Translation = "自備中譯：葡萄";            Checked = $true;  Status = "新字" },
+    @{ Name = "kiwi";  Translation = "線上查詢";                  Checked = $true;  Status = "新字" },
+    @{ Name = "mango"; Translation = "自備中譯：芒果, 熱帶水果";  Checked = $true;  Status = "新字" },
+    @{ Name = "apple"; Translation = "自備中譯：蘋果";            Checked = $false; Status = "勾選＝以自備中譯更新；已在筆記" }
+  )
+  if ($rows12.Count -ne $expect12.Count) { $fails += "⑫：列數＝$($rows12.Count)，應為 4（表頭列略過）" }
+  for ($i = 0; $i -lt [Math]::Min($rows12.Count, $expect12.Count); $i++) {
+    $r = $rows12[$i]; $e = $expect12[$i]
+    if ($r.Name -ne $e.Name)               { $fails += "⑫：列$i 名稱「$($r.Name)」≠「$($e.Name)」" }
+    if ($r.Translation -ne $e.Translation) { $fails += "⑫：列$i（$($e.Name)）中譯來源「$($r.Translation)」≠「$($e.Translation)」" }
+    if ($r.Checked -ne $e.Checked)         { $fails += "⑫：列$i（$($e.Name)）預設勾選＝$($r.Checked)，應為 $($e.Checked)" }
+    if (-not $r.Status.StartsWith($e.Status)) { $fails += "⑫：列$i（$($e.Name)）狀態「$($r.Status)」未以「$($e.Status)」起首" }
+  }
+  $force = Find-ByAutomationId -Root $confirm -Id "NotesImportForceOnline"
+  if ($null -eq $force) { $fails += "⑫：有自備中譯卻未見整批切換（NotesImportForceOnline）" }
+  elseif ((Toggle-State $force) -ne [System.Windows.Automation.ToggleState]::Off) { $fails += "⑫：整批切換預設應為未勾" }
+  $btn = Find-ByAutomationId -Root $confirm -Id "NotesImportConfirm"
+  Write-Host "* ⑫ 主鈕＝「$($btn.Current.Name)」／費用＝「$(Get-CostText $confirm)」"
+  if ($btn.Current.Name -ne "加入 3 字（查詢 1 字）") { $fails += "⑫：主鈕「$($btn.Current.Name)」≠「加入 3 字（查詢 1 字）」" }
+  $cost = Get-CostText $confirm
+  if ($cost -notlike "*共 1 次 AI 查詢*" -or $cost -notlike "*另 2 字採用自備中譯*") { $fails += "⑫：費用揭露「$cost」未含「共 1 次 AI 查詢」與「另 2 字採用自備中譯」" }
+  $confirmHwnd = [IntPtr]$confirm.Current.NativeWindowHandle
+  Set-WindowForeground -Hwnd $confirmHwnd | Out-Null; Start-Sleep -Milliseconds 300
+  Save-WindowShot -Hwnd $confirmHwnd -Path (Join-Path $OutDir "08-own-translation-confirm.png")
+  Copy-Item (Join-Path $OutDir "08-own-translation-confirm.png") $ownPng -Force
+  Write-Host "* 手冊圖已產出（自備中譯狀態）：$ownPng"
+  #endregion
+
+  #region M.#321 ⑬ 整批切換「也改查線上」與還原 --------------------------------
+  Write-Host "## M.#321 ⑬ 整批切換 --------------------------------" -ForegroundColor Cyan
+  if ($null -ne $force) {
+    $force.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle(); Start-Sleep -Milliseconds 500
+    $rows13 = @(Get-RowSnapshot $confirm)
+    $btn = Find-ByAutomationId -Root $confirm -Id "NotesImportConfirm"
+    Write-Host "* ⑬ 切換後中譯來源：$(($rows13 | ForEach-Object { $_.Translation }) -join '｜')／主鈕「$($btn.Current.Name)」"
+    if (@($rows13 | Where-Object { $_.Translation -ne "線上查詢" }).Count -gt 0) { $fails += "⑬：切換後仍有非「線上查詢」之中譯來源" }
+    if ($btn.Current.Name -ne "查詢並加入 3 字") { $fails += "⑬：切換後主鈕「$($btn.Current.Name)」≠「查詢並加入 3 字」" }
+    if ($rows13.Count -ge 4 -and -not $rows13[3].Status.StartsWith("已在筆記")) { $fails += "⑬：切換後 apple 狀態「$($rows13[3].Status)」未回到「已在筆記…重新查詢」" }
+    $force.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle(); Start-Sleep -Milliseconds 500
+    $btn = Find-ByAutomationId -Root $confirm -Id "NotesImportConfirm"
+    $rowsBack = @(Get-RowSnapshot $confirm)
+    if ($btn.Current.Name -ne "加入 3 字（查詢 1 字）" -or $rowsBack[0].Translation -ne "自備中譯：葡萄") { $fails += "⑬：取消切換後未還原（主鈕「$($btn.Current.Name)」、首列「$($rowsBack[0].Translation)」）" }
+    else { Write-Host "* [OK] ⑬ 整批切換與還原皆符" -ForegroundColor Green }
+  }
+  #endregion
+
+  #region N.#321 ⑭ 全自備實按加入：不開 AI 動作頁、零查詢、寫入自備中譯 --------------------------------
+  Write-Host "## N.#321 ⑭ 全自備實按加入 --------------------------------" -ForegroundColor Cyan
+  $kiwiBox = Find-ByAutomationId -Root $confirm -Id "NotesImportRow1"
+  if ($null -eq $kiwiBox -or $kiwiBox.Current.Name -ne "kiwi") { throw "⑭：找不到 kiwi 列（NotesImportRow1）" }
+  if ((Toggle-State $kiwiBox) -ne [System.Windows.Automation.ToggleState]::On) { throw "⑭：kiwi 前置應為勾選狀態——不盲切，據實中止" }
+  $kiwiBox.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle(); Start-Sleep -Milliseconds 500
+  $btn = Find-ByAutomationId -Root $confirm -Id "NotesImportConfirm"
+  $cost = Get-CostText $confirm
+  Write-Host "* ⑭ 取消 kiwi 後：主鈕「$($btn.Current.Name)」／費用「$cost」"
+  if ($btn.Current.Name -ne "加入 2 字（不查詢）") { throw "⑭：主鈕「$($btn.Current.Name)」≠「加入 2 字（不查詢）」——不實按，據實中止（避免走到線上查詢）" }
+  if ($cost -notlike "*不會呼叫 AI*") { $fails += "⑭：費用揭露「$cost」未含「不會呼叫 AI」" }
+  Invoke-El $btn
+  $msg = $null
+  $deadline = (Get-Date).AddSeconds(15)
+  while ((Get-Date) -lt $deadline -and $null -eq $msg) {
+    $w = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "匯入清單" -ExcludeHwnd $hwnd -TimeoutSec 1
+    if ($null -ne $w -and $null -eq (Find-ByAutomationId -Root $w -Id "NotesImportConfirm")) { $msg = $w }
+  }
+  if ($null -eq $msg) { $fails += "⑭：按下後未見結果訊息框（Title 匯入清單）" }
+  else {
+    # Win32 訊息框之文字元件可能稍後才填入 UIA 名稱：輪詢至含「匯入完成」或逾時（任何控制型別皆看）
+    $msgText = ""
+    $tEnd = (Get-Date).AddSeconds(5)
+    while ((Get-Date) -lt $tEnd -and $msgText -notlike "*匯入完成*") {
+      $msgText = (@($msg.FindAll($TS::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) -join " ")
+      if ($msgText -notlike "*匯入完成*") { Start-Sleep -Milliseconds 300 }
+    }
+    Write-Host "* ⑭ 結果訊息＝「$msgText」"
+    if ($msgText -notlike "*已加入 2 字*" -or $msgText -notlike "*採用自備中譯*") { $fails += "⑭：結果訊息未含「已加入 2 字」與「採用自備中譯」（實得「$msgText」）" }
+    Save-WindowShot -Hwnd ([IntPtr]$msg.Current.NativeWindowHandle) -Path (Join-Path $OutDir "09-own-result.png")
+    $ok = @($msg.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Button))) | Where-Object { $_.Current.Name -in @("OK", "確定") }) | Select-Object -First 1
+    if ($null -ne $ok) { Invoke-El $ok; Start-Sleep -Milliseconds 600 }
+  }
+  $aiWin = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "*正在匯入*" -ExcludeHwnd $hwnd -TimeoutSec 1
+  if ($null -ne $aiWin) { $fails += "⑭：全自備卻開了 AI 動作確認頁（正在匯入…）" }
+  if ((Get-LedgerBytes).Length -ne $ledgerBefore.Length) { $fails += "⑭：AI 花費帳本有變動" }
+  $j = Get-Content (Join-Path $appData "notes.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  $all = @(Get-AllFolders $j.Folders | ForEach-Object { @($_.Entries) })
+  $g = $all | Where-Object { $_.Original -eq "grape" } | Select-Object -First 1
+  $m = $all | Where-Object { $_.Original -eq "mango" } | Select-Object -First 1
+  $k = $all | Where-Object { $_.Original -eq "kiwi" } | Select-Object -First 1
+  Write-Host "* ⑭ notes.json：grape＝「$($g.Translation)」音標「$($g.Phonetic)」／mango＝「$($m.Translation)」／kiwi 存在＝$($null -ne $k)"
+  if ($null -eq $g -or $g.Translation -ne "葡萄" -or $g.Phonetic -ne "") { $fails += "⑭：grape 未以自備中譯「葡萄」寫入且音標空" }
+  if ($null -eq $m -or $m.Translation -ne "芒果, 熱帶水果") { $fails += "⑭：mango 未以自備中譯「芒果, 熱帶水果」寫入" }
+  if ($null -ne $k) { $fails += "⑭：kiwi 未勾卻被寫入" }
+  if ((Get-FolderIdOf "grape") -ne $probeId) { $fails += "⑭：grape 未寫入目前選取夾「$probeName」" }
+  if ($fails.Count -eq 0) { Write-Host "* [OK] ⑫–⑭ 自備中譯：中譯來源欄、整批切換、全自備零查詢寫入皆符" -ForegroundColor Green }
+  #endregion
+
 }
 finally {
   #region F.收尾：關程式並還原 APPDATA --------------------------------
   Write-Host "## F.收尾 --------------------------------" -ForegroundColor Cyan
   Get-Process -Name "LingoIsland" -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); $_.WaitForExit(5000) }
   Start-Sleep -Milliseconds 500
+  $env:OPENAI_API_KEY = $origApiKey   # #321：還原本行程之金鑰環境變數
   if (Test-Path $backupDir) {
     Remove-Item -Path $appData -Recurse -Force -ErrorAction SilentlyContinue
     Copy-Item -Path $backupDir -Destination $appData -Recurse -Force
@@ -673,6 +826,6 @@ if ($fails.Count -gt 0) {
   $fails | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
   exit 1
 }
-Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
+Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪、#321 ⑫–⑭ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
 exit 0
 #endregion
