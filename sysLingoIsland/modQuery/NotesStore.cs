@@ -191,7 +191,7 @@ public sealed class NotesStore
     /// <paramref name="insertAt"/>：插入索引（null＝頂端）；<paramref name="batchKeys"/> 非 null 時（#322 匯入）改插在本批寫入最晚且仍在夾內者之後（見 <see cref="BatchInsertIndex"/>），<paramref name="insertAt"/> 不用。
     /// 存檔失敗**擲出**（不同於 <see cref="Save"/> 之靜默降級）——匯入結果表不得把未落地之字計已加入。回 <see cref="NoteAddResult"/>。
     /// </summary>
-    public NoteAddResult AddToFolderAndSave(QueryResult r, string folderId, string? colorHex, DateTimeOffset now, int? insertAt = null, IReadOnlyList<string>? batchKeys = null)
+    public NoteAddResult AddToFolderAndSave(QueryResult r, string folderId, string? colorHex, DateTimeOffset now, int? insertAt = null, IReadOnlyList<string>? batchKeys = null, Action<NoteWriteRecord>? onWritten = null)
     {
         var d = LoadStrict(); // #322：讀失敗擲出、不以空結構寫回
         var entry = NoteEntry.From(r, now) with { Color = colorHex ?? "" };
@@ -201,8 +201,24 @@ public sealed class NotesStore
         var idx = batchKeys is null ? Math.Clamp(insertAt ?? 0, 0, folder.Entries.Count) : BatchInsertIndex(folder, batchKeys);
         folder.Entries.Insert(idx, entry);
         if (!TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+        onWritten?.Invoke(new NoteWriteRecord(null, entry, folder.Id)); // #324：存檔成功後才回報
         return NoteAddResult.Added;
     }
+
+    /// <summary>
+    /// 整批撤銷（spec#14／#324 ⑤）：一次嚴格讀檔→<see cref="NoteImportUndo.Apply"/> 在讀得之資料上實算→有任一移除或還原才一次原子存檔。
+    /// 讀失敗擲 <see cref="IOException"/>（損毀為 <see cref="NotesFileCorruptException"/>）、存檔失敗擲 <see cref="IOException"/>——皆筆記檔不變。
+    /// </summary>
+    public NoteUndoPlan UndoImportAndSave(IReadOnlyList<NoteWriteRecord> journal)
+    {
+        var d = LoadStrict();
+        var plan = NoteImportUndo.Apply(d, journal);
+        if (plan.HasChange && !TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+        return plan;
+    }
+
+    /// <summary>撤銷試算（#324 ⑦）：嚴格讀檔後以 <see cref="NoteImportUndo.Plan"/> 試算，不寫檔；讀失敗擲出。</summary>
+    public NoteUndoPlan PlanUndo(IReadOnlyList<NoteWriteRecord> journal) => NoteImportUndo.Plan(LoadStrict(), journal);
 
     /// <summary>
     /// 批次相連之插入位置（#322）：本批已加入之字（<paramref name="batchKeys"/> 依寫入順序）中、仍在 <paramref name="folder"/> 內且寫入順序最晚者之後；
@@ -253,7 +269,7 @@ public sealed class NotesStore
     /// 留在原夾、不重複建立、**保留 Id／AddedAt／Color／練習分數**（字沒變、成績不歸零——與 <see cref="UpdateEntryContent"/> 之「原文已變」語意不同）；
     /// 原文採既有筆記之寫法（不以 AI 回之大小寫整形覆蓋）。找不到該鍵（他處同時刪除）回 false、不寫入。
     /// </summary>
-    public bool RefreshEntryByKeyAndSave(QueryResult r)
+    public bool RefreshEntryByKeyAndSave(QueryResult r, Action<NoteWriteRecord>? onWritten = null)
     {
         var key = NoteEntry.KeyOf(r.Original);
         if (string.IsNullOrEmpty(key)) { return false; }
@@ -263,8 +279,10 @@ public sealed class NotesStore
             var i = f.Entries.FindIndex(e => e.Key == key);
             if (i >= 0)
             {
-                f.Entries[i] = f.Entries[i] with { Phonetic = r.Phonetic, Translation = r.Translation };
+                var before = f.Entries[i];
+                f.Entries[i] = before with { Phonetic = r.Phonetic, Translation = r.Translation };
                 if (!TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+                onWritten?.Invoke(new NoteWriteRecord(before, f.Entries[i], f.Id)); // #324：覆寫前全貌即在此保存
                 return true;
             }
         }
@@ -276,12 +294,13 @@ public sealed class NotesStore
     /// 目標夾不在退回第一個頂層夾、插入位置同 <see cref="AddToFolderAndSave"/>（有 batchKeys 時接在本批寫入最晚者之後，否則第 k 個加入者插在 insertAt＋k））＋已在筆記者以自備中譯更新
     /// （只換中譯、保留音標／Id／底色／練習分數——與 <see cref="RefreshEntryByKeyAndSave"/> 之全欄刷新不同）。存檔失敗擲出 <see cref="IOException"/>、筆記檔不變（整批未落地）。
     /// </summary>
-    public IReadOnlyList<OwnTranslationWriteResult> AddOrRefreshOwnTranslationsAndSave(IReadOnlyList<QueryResult> results, string folderId, string? colorHex, DateTimeOffset now, int insertAt, IReadOnlyList<string>? batchKeys = null)
+    public IReadOnlyList<OwnTranslationWriteResult> AddOrRefreshOwnTranslationsAndSave(IReadOnlyList<QueryResult> results, string folderId, string? colorHex, DateTimeOffset now, int insertAt, IReadOnlyList<string>? batchKeys = null, Action<NoteWriteRecord>? onWritten = null)
     {
         var d = LoadStrict(); // #322：讀失敗擲出、不以空結構寫回
         var folder = FindFolder(d, folderId) ?? d.Folders[0];
         var idx = batchKeys is null ? Math.Clamp(insertAt, 0, folder.Entries.Count) : BatchInsertIndex(folder, batchKeys);
         var outcome = new List<OwnTranslationWriteResult>();
+        var written = new List<NoteWriteRecord>(); // #324：整段一次存檔成功後一起回報
         foreach (var r in results)
         {
             var entry = NoteEntry.From(r, now) with { Color = colorHex ?? "" };
@@ -289,15 +308,19 @@ public sealed class NotesStore
             var existing = AllFolders(d).Select(f => (f, i: f.Entries.FindIndex(e => e.Key == entry.Key))).FirstOrDefault(x => x.i >= 0);
             if (existing.f is not null)
             {
-                existing.f.Entries[existing.i] = existing.f.Entries[existing.i] with { Translation = r.Translation };
+                var before = existing.f.Entries[existing.i];
+                existing.f.Entries[existing.i] = before with { Translation = r.Translation };
+                written.Add(new NoteWriteRecord(before, existing.f.Entries[existing.i], existing.f.Id));
                 outcome.Add(OwnTranslationWriteResult.Updated);
                 continue;
             }
             folder.Entries.Insert(Math.Min(idx, folder.Entries.Count), entry);
             idx++;
+            written.Add(new NoteWriteRecord(null, entry, folder.Id));
             outcome.Add(OwnTranslationWriteResult.Added);
         }
         if (outcome.Any(o => o != OwnTranslationWriteResult.Empty) && !TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+        if (onWritten is not null) { foreach (var w in written) { onWritten(w); } }
         return outcome;
     }
 
