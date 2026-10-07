@@ -409,7 +409,7 @@ public class NotesImportOwnTranslationTests
     {
         var cs = Regex.Replace(Regex.Replace(ReadRepoFile("sysLingoIsland", "App.xaml.cs"), "/\\*.*?\\*/", "", RegexOptions.Singleline), "//[^\\n]*", "");
         var run = Body(cs, "RunNotesImport");
-        Assert.Matches(new Regex(@"if \(words\.All\(w => w\.IsOwn\)\) \{ RunOwnOnlyNotesImport\(folderId, folderName, words\); return; \}"), run);
+        Assert.Matches(new Regex(@"if \(words\.All\(w => w\.IsOwn\)\) \{ RunOwnOnlyNotesImport\(folderId, folderName, words, sources\); return; \}"), run); // #323 起帶本批來源
         Assert.True(run.IndexOf("RunOwnOnlyNotesImport(", StringComparison.Ordinal) < run.IndexOf("QueryService", StringComparison.Ordinal)); // 分流在建查詢服務之前
         var own = Body(cs, "RunOwnOnlyNotesImport");
         Assert.DoesNotContain("QueryService", own);

@@ -33,6 +33,10 @@
         <Button x:Name="SelectNoneBtn" DockPanel.Dock="Left" Content="全不選" Style="{StaticResource GhostButton}"
                 AutomationProperties.AutomationId="NotesImportSelectNone" Padding="10,3"
                 ToolTip="取消所有勾選（之後可逐列再勾）"/>
+        <!-- #323：同一檔上次匯入有失敗字時可按——恰勾那幾列、其餘不勾；停用時 ToolTip 亦顯示（ShowOnDisabled） -->
+        <Button x:Name="SelectFailedBtn" DockPanel.Dock="Left" Content="只勾上次失敗字" Style="{StaticResource GhostButton}"
+                AutomationProperties.AutomationId="NotesImportSelectFailed" Padding="10,3" Margin="6,0,0,0"
+                IsEnabled="False" ToolTipService.ShowOnDisabled="True"/>
         <!-- #321：有自備中譯（csv 第二欄）時才顯示——整批改為線上查詢 -->
         <CheckBox x:Name="ForceOnlineBox" DockPanel.Dock="Left" Content="有自備中譯的字也改查線上" FontSize="11.5"
                   Margin="12,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" Foreground="{StaticResource PinkText}"

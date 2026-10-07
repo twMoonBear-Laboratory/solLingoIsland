@@ -20,9 +20,10 @@ public enum NotesImportStatus
 /// <paramref name="FirstSource"/>＝重複列之首見來源（同檔時與 Source 相同）。
 /// <paramref name="OwnTranslation"/>（#321）＝非重複列：採用之自備中譯（csv 第二欄，同字多筆時取合併序第一個非空者）；重複列：該列自己的第二欄。
 /// <paramref name="TranslationFromDuplicate"/>＝非重複列之自備中譯係自後見之重複列遞補；<paramref name="TranslationRejected"/>＝重複列之第二欄非空且與採用者不同。
+/// <paramref name="PreviouslyFailed"/>（#323）＝可勾選列且其鍵在本批來源檔之上次失敗紀錄內——狀態文字前置「上次匯入失敗；」、「只勾上次失敗字」之對象。
 /// </summary>
 public sealed record NotesImportEntry(string Text, NotesImportStatus Status, string ExistingFolder = "", string Source = "", string FirstSource = "",
-    string OwnTranslation = "", bool TranslationFromDuplicate = false, bool TranslationRejected = false)
+    string OwnTranslation = "", bool TranslationFromDuplicate = false, bool TranslationRejected = false, bool PreviouslyFailed = false)
 {
     /// <summary>非重複列且帶自備中譯（#321）。</summary>
     public bool HasOwnTranslation => Status != NotesImportStatus.DuplicateInFile && OwnTranslation.Length > 0;
@@ -497,11 +498,17 @@ public static class NotesImport
     /// <summary>單列狀態文案（純函式）——與設計 [modHmi筆記匯入確認頁] 狀態欄一一對應，文字即原因。</summary>
     public static string StatusText(NotesImportEntry e) => StatusText(e, forceOnline: false);
 
+    /// <summary>上次失敗列之狀態前置（#323；置前免被長夾路徑之省略號截掉）。</summary>
+    public const string PreviouslyFailedPrefix = "上次匯入失敗；";
+
     /// <summary>
     /// 單列狀態文案（#321）：帶自備中譯之已在筆記列（未切仍查線上）＝「勾選＝以自備中譯更新；已在筆記「夾」」（關鍵句置前）；
     /// 重複列之第二欄與採用者不同（未切仍查線上）追加「；中譯「X」未採用」。其餘同 v4.18.0。
     /// </summary>
     public static string StatusText(NotesImportEntry e, bool forceOnline)
+        => (e.PreviouslyFailed && e.IsSelectable ? PreviouslyFailedPrefix : "") + StatusTextCore(e, forceOnline); // #323：兩種變體皆前置
+
+    private static string StatusTextCore(NotesImportEntry e, bool forceOnline)
     {
         if (!forceOnline && e.Status == NotesImportStatus.AlreadyInNotes && e.HasOwnTranslation)
         {
@@ -595,11 +602,33 @@ public static class NotesImport
         }
         if (failed.Count > 0)
         {
-            sb.Append("\n\n失敗（其餘字不受影響；可再匯入一次只勾這幾個）：\n");
+            sb.Append("\n\n" + FailedSectionTitle + "\n");
             sb.Append(string.Join("\n", failed.Select(f => $"· {f.Word}——{f.Reason}")));
         }
         return sb.ToString();
     }
+
+    /// <summary>結果表失敗段標題（#323：指向確認頁之「只勾上次失敗字」）。</summary>
+    public const string FailedSectionTitle = "失敗（其餘字不受影響；再匯入同一份清單時，按確認表上的「只勾上次失敗字」即可只重試這幾個）：";
+
+    // ---- #323 只勾上次失敗字（純函式）----
+
+    /// <summary>「只勾上次失敗字」停用時之 ToolTip（#323）。</summary>
+    public const string SelectFailedDisabledHint = "這次選的檔沒有上次匯入失敗的紀錄";
+
+    /// <summary>「只勾上次失敗字」鈕文案（#323）：N＞0「只勾上次失敗字（N）」、0「只勾上次失敗字」。</summary>
+    public static string SelectFailedButtonText(int n) => n > 0 ? $"只勾上次失敗字（{n}）" : "只勾上次失敗字";
+
+    /// <summary>可勾選且鍵在 <paramref name="failedKeys"/> 內之列標上次失敗（#323；重複列不標）。</summary>
+    public static List<NotesImportEntry> MarkPreviouslyFailed(IReadOnlyList<NotesImportEntry> entries, IReadOnlySet<string> failedKeys)
+        => entries.Select(e => e.IsSelectable && failedKeys.Contains(NoteEntry.KeyOf(e.Text)) ? e with { PreviouslyFailed = true } : e with { PreviouslyFailed = false }).ToList();
+
+    /// <summary>按鈕 N（#323）＝本次確認表中對應到上次失敗紀錄之可勾選列數。</summary>
+    public static int PreviouslyFailedCount(IReadOnlyList<NotesImportEntry> entries) => entries.Count(e => e.PreviouslyFailed && e.IsSelectable);
+
+    /// <summary>本批來源→失敗紀錄之來源（#323）：完整路徑＋該檔原字（依清單序）。</summary>
+    public static List<ImportFailureSource> FailureSources(IReadOnlyList<NotesImportSource> sources)
+        => sources.Where(s => s.Path.Length > 0).Select(s => new ImportFailureSource(s.Path, s.Lines.ToList())).ToList();
 
     // ---- #322 背景執行之文案（純函式）----
 

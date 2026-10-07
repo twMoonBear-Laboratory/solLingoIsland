@@ -80,6 +80,12 @@ public partial class NotesImportWindow : Window
 
         SelectNewBtn.Click += (_, _) => { foreach (var r in _rows) { r.Box.IsChecked = r.Entry.Status == NotesImportStatus.New; } Refresh(); };
         SelectNoneBtn.Click += (_, _) => { foreach (var r in _rows) { r.Box.IsChecked = false; } Refresh(); };
+        // #323：只勾上次失敗字（N）——N＝對應到上次失敗紀錄之可勾選列數；0 停用（ToolTip 說明，停用時亦顯示）
+        var failedN = NotesImport.PreviouslyFailedCount(entries);
+        SelectFailedBtn.Content = NotesImport.SelectFailedButtonText(failedN);
+        SelectFailedBtn.IsEnabled = failedN > 0;
+        SelectFailedBtn.ToolTip = failedN > 0 ? "只勾上次匯入這些檔時失敗的字，其餘全部不勾（之後可逐列再改）" : NotesImport.SelectFailedDisabledHint;
+        SelectFailedBtn.Click += (_, _) => { foreach (var r in _rows) { r.Box.IsChecked = r.Entry.PreviouslyFailed && r.Entry.IsSelectable; } Refresh(); };
         ConfirmBtn.Click += (_, _) =>
         {
             SelectedItems = NotesImport.ToItems(_entries, i => _rows[i].Box.IsChecked == true, ForceOnline);
@@ -205,7 +211,7 @@ public partial class NotesImportWindow : Window
     {
         var force = ForceOnline;
         SummaryText.Text = NotesImport.SummaryText(_entries, _multiSource, force);
-        SummaryText.ToolTip = _hasOwn ? SummaryText.Text : null; // 無自備中譯時同 v4.18.0（不加懸停提示）
+        SummaryText.ToolTip = SummaryText.Text; // #323：表上方多一鈕後摘要可能被截斷——恆設全文
         foreach (var r in _rows)
         {
             var st = NotesImport.StatusText(r.Entry, force);
