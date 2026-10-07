@@ -11,6 +11,9 @@ public sealed record NotesImportOutcome(int Added, int Updated, IReadOnlyList<st
     /// <summary>已加入之字（依寫入順序），供結果表逐字列出（取消後使用者才看得到留下了哪些）。</summary>
     public IReadOnlyList<string> AddedWords { get; init; } = Array.Empty<string>();
 
+    /// <summary>已更新之字（依寫入順序；#323：與 <see cref="AddedWords"/> 同為「成功」，供失敗紀錄剔除）。</summary>
+    public IReadOnlyList<string> UpdatedWords { get; init; } = Array.Empty<string>();
+
     /// <summary>目標夾於結束時已不存在——結果表與 toast 須如實說明，不得仍寫原夾名。</summary>
     public bool TargetFolderMissing { get; init; }
 
@@ -91,6 +94,12 @@ public sealed class NotesImportRunner
     /// <summary>測試縫假查詢寫入之中譯前綴（#322）。</summary>
     public const string FakeTranslationPrefix = "〔測試假查詢〕";
 
+    /// <summary>測試縫（#323）之環境變數名：逗號分隔之字，僅與 <see cref="FakeLookupEnvVar"/> 同時生效——列名之字於本行程第一次假查詢時擲查詢失敗、其後成功。</summary>
+    public const string FakeFailOnceEnvVar = "LINGOISLAND_IMPORT_FAKE_FAIL_ONCE";
+
+    /// <summary>測試縫注入失敗之原因（#323）。</summary>
+    public const string FakeFailReason = "〔測試假查詢〕模擬失敗";
+
     /// <summary>全自備時之守衛查詢委派（#321）：被呼叫即擲例外——自備中譯不得觸發線上查詢。</summary>
     public static readonly Func<string, CancellationToken, Task<QueryResult>> NoLookup =
         (_, _) => throw new InvalidOperationException("自備中譯之匯入不得呼叫線上查詢");
@@ -122,12 +131,28 @@ public sealed class NotesImportRunner
         => int.TryParse((envValue ?? "").Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var ms) && ms is >= 1 and <= 60000 ? ms : null;
 
     /// <summary>測試縫之延遲假查詢（#322）：等待 <paramref name="delayMs"/> 毫秒（可隨權杖取消）後回「〔測試假查詢〕原字」——不連網、不花額度。</summary>
-    public static Func<string, CancellationToken, Task<QueryResult>> MakeFakeLookup(int delayMs)
-        => async (text, ct) =>
+    public static Func<string, CancellationToken, Task<QueryResult>> MakeFakeLookup(int delayMs) => MakeFakeLookup(delayMs, null, new HashSet<string>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// 測試縫之延遲假查詢＋注入失敗（#323）：<paramref name="failOnce"/>（<see cref="FakeFailOnceEnvVar"/> 之值，逗號分隔、以去重鍵比對）列名之字
+    /// 第一次被查時（等待後）擲 <see cref="QueryException"/>，其後同字成功。「第一次」以 <paramref name="alreadyFailed"/> 記——App 傳入行程層級之集合
+    /// （每批匯入各建一個委派，集合須跨批共用才是「本行程第一次」）。null／空＝不注入。
+    /// </summary>
+    public static Func<string, CancellationToken, Task<QueryResult>> MakeFakeLookup(int delayMs, string? failOnce, ISet<string> alreadyFailed)
+    {
+        var names = new HashSet<string>(ParseFailOnce(failOnce), StringComparer.Ordinal);
+        return async (text, ct) =>
         {
             await Task.Delay(delayMs, ct).ConfigureAwait(true);
+            var key = NoteEntry.KeyOf(text);
+            if (names.Contains(key) && alreadyFailed.Add(key)) { throw new QueryException(FakeFailReason); }
             return new QueryResult(text, "", FakeTranslationPrefix + text);
         };
+    }
+
+    /// <summary>注入失敗名單之解析（#323）：逗號分隔、去空白、去重鍵。</summary>
+    public static IReadOnlyList<string> ParseFailOnce(string? value)
+        => (value ?? "").Split(',').Select(NoteEntry.KeyOf).Where(k => k.Length > 0).Distinct().ToList();
 
     /// <summary>字串清單（全部線上查詢）之多載——同 v4.18.0。</summary>
     public Task<NotesImportOutcome> RunAsync(IReadOnlyList<string> words, string folderId, string? colorHex,
@@ -144,6 +169,7 @@ public sealed class NotesImportRunner
         Action<string>? report, CancellationToken ct, Action<NotesImportProgress>? progress = null)
     {
         var acc = new Acc();
+        _acc = acc; // #323：結束入口之 Snapshot() 讀此累積
         int onlineOk = 0, streak = 0, done = 0;
         string firstError = "";
         var cancelled = false;
@@ -212,7 +238,7 @@ public sealed class NotesImportRunner
                             case NoteAddResult.Added: acc.Added++; acc.AddedWords.Add(w); acc.BatchKeys.Add(NoteEntry.KeyOf(w)); streak = 0; onlineOk++; wrote = true; break;
                             case NoteAddResult.AlreadyExists:
                                 // 勾選「已在筆記」列之語意：重新查詢並更新原筆（留原夾、不重複建立、保留練習分數）；原筆已不在→略過
-                                if (_store.RefreshEntryByKeyAndSave(toSave)) { acc.Updated++; onlineOk++; wrote = true; } else { acc.Skipped.Add(w); }
+                                if (_store.RefreshEntryByKeyAndSave(toSave)) { acc.Updated++; acc.UpdatedWords.Add(w); onlineOk++; wrote = true; } else { acc.Skipped.Add(w); }
                                 streak = 0;
                                 break;
                             default: acc.Failed.Add((w, "沒有可儲存的內容")); streak++; if (firstError.Length == 0) { firstError = "沒有可儲存的內容"; } break;
@@ -244,14 +270,35 @@ public sealed class NotesImportRunner
     {
         if (items.Any(x => (x.Text ?? "").Trim().Length > 0 && !x.IsOwn)) { throw new ArgumentException("RunOwnOnly 只收全部帶自備中譯之字", nameof(items)); }
         var acc = new Acc();
+        _acc = acc; // #323：結束入口之 Snapshot() 讀此累積
         WriteOwnSegment(items.Select(x => ((x.Text ?? "").Trim(), x.OwnTranslation.Trim())).Where(x => x.Item1.Length > 0).ToList(), folderId, colorHex, acc);
         return Finish(acc, folderId, cancelled: false);
+    }
+
+    /// <summary>目前（或最近一次）執行之逐字累積（#323）：<see cref="RunAsync"/>／<see cref="RunOwnOnly"/> 開始時重置。</summary>
+    private Acc _acc = new();
+
+    /// <summary>
+    /// 執行至此刻之逐字結果之複本（#323）：結束 app 之入口於取消權杖之前取用以更新失敗紀錄（收尾跑不到）。與收尾之 <see cref="NotesImportOutcome"/> 同形、
+    /// <see cref="NotesImportOutcome.Cancelled"/>＝true；不讀磁碟（不判目標夾）。同在 UI 執行緒呼叫，取得當下無半筆。
+    /// </summary>
+    public NotesImportOutcome Snapshot()
+    {
+        var a = _acc;
+        return new NotesImportOutcome(a.Added, a.Updated, a.Skipped.ToList(), a.Failed.ToList())
+        {
+            Cancelled = true,
+            AddedWords = a.AddedWords.ToList(),
+            UpdatedWords = a.UpdatedWords.ToList(),
+            OwnTranslationUsed = a.Own,
+        };
     }
 
     private sealed class Acc
     {
         public int Added, Updated, Own;
         public readonly List<string> AddedWords = new();
+        public readonly List<string> UpdatedWords = new(); // #323
         public readonly List<string> BatchKeys = new(); // #322：本批已加入之字之去重鍵（寫入順序）
         public readonly List<string> Skipped = new();
         public readonly List<(string Word, string Reason)> Failed = new();
@@ -269,7 +316,7 @@ public sealed class NotesImportRunner
                 switch (results[k])
                 {
                     case OwnTranslationWriteResult.Added: acc.Added++; acc.Own++; acc.AddedWords.Add(seg[k].Text); acc.BatchKeys.Add(NoteEntry.KeyOf(seg[k].Text)); break;
-                    case OwnTranslationWriteResult.Updated: acc.Updated++; acc.Own++; break;
+                    case OwnTranslationWriteResult.Updated: acc.Updated++; acc.UpdatedWords.Add(seg[k].Text); acc.Own++; break;
                     default: acc.Failed.Add((seg[k].Text, "沒有可儲存的內容")); break;
                 }
             }
@@ -289,6 +336,7 @@ public sealed class NotesImportRunner
         {
             Cancelled = cancelled,
             AddedWords = acc.AddedWords,
+            UpdatedWords = acc.UpdatedWords,
             TargetFolderMissing = missing,
             FallbackFolder = missing ? NotesStore.FolderPath(dEnd, dEnd.Folders[0].Id) : "",
             OwnTranslationUsed = acc.Own,

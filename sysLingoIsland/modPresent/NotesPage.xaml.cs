@@ -339,7 +339,11 @@ public partial class NotesPage : UserControl
     /// 確認頁按下主鈕（「查詢並加入 N 字」或 #321 之「加入 N 字（…）」）後觸發：(目標資料夾 Id, 目標資料夾名, 勾選之字＋自備中譯清單〔#321；自備中譯空＝線上查詢〕)。
     /// 本頁只負責選檔→預掃描→確認（確認前零 AI 呼叫）；逐字線上查詢與寫入由 App 以 <see cref="NotesImportRunner"/> 執行後 <see cref="Reload"/>。
     /// </summary>
-    public event Action<string, string, IReadOnlyList<NotesImportItem>>? ImportConfirmed;
+    /// <remarks>#323：第 4 參數＝本批來源（每檔完整路徑＋原字），供 App 收尾更新失敗紀錄。</remarks>
+    public event Action<string, string, IReadOnlyList<NotesImportItem>, IReadOnlyList<ImportFailureSource>>? ImportConfirmed;
+
+    /// <summary>匯入失敗紀錄（#323）：預掃描時讀本批來源檔之上次失敗字（讀不到／損毀＝無紀錄、不擋匯入）。</summary>
+    public ImportFailureStore FailureStore { get; set; } = new();
 
     /// <summary>匯入流程進行中（#320）：自按鈕／放下起至 <see cref="BeginImportFiles"/> 返回止；一律以 try/finally 解除，期間不受理新的拖放與按鈕。</summary>
     private bool _importBusy;
@@ -415,9 +419,11 @@ public partial class NotesPage : UserControl
             return;
         }
         var folderPath = NotesStore.FolderPath(data, folder.Id) is { Length: > 0 } fp ? fp : folder.Name;
-        var win = new NotesImportWindow(load.Sources, excluded, folderPath, scan.Entries) { Owner = owner };
+        // #323：本批來源檔之上次失敗字（不擲出；讀不到或損毀＝空集合、按鈕停用）
+        var entries = NotesImport.MarkPreviouslyFailed(scan.Entries, FailureStore.FailedKeysFor(load.Sources.Select(s => s.Path)));
+        var win = new NotesImportWindow(load.Sources, excluded, folderPath, entries) { Owner = owner };
         if (win.ShowDialog() != true || win.SelectedItems.Count == 0) { return; }
-        ImportConfirmed?.Invoke(folder.Id, folderPath, win.SelectedItems); // 結果表與 toast 用同一個路徑名（B-13）
+        ImportConfirmed?.Invoke(folder.Id, folderPath, win.SelectedItems, NotesImport.FailureSources(load.Sources)); // 結果表與 toast 用同一個路徑名（B-13）
     }
 
     // ---- 檔案拖放匯入（#320）：頁層 Preview 穿隧先攔 FileDrop；非 FileDrop 一律不碰、不設 Handled（既有資料夾／條目拖曳原封走原處理器）----

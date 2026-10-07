@@ -53,6 +53,11 @@ public partial class App : System.Windows.Application
     private (NotesImportEnding Ending, string Body)? _pendingImportResult; // 待開之結果（主視窗最小化／結束中時延後）
     private NotesImportResultWindow? _importResultWindow; // 同一時間至多一個
     private bool ImportRunning => _importCts is not null;
+    // ---- #323 只勾上次失敗字（契約「只勾上次失敗字」③⑧）----
+    private readonly ImportFailureStore _importFailureStore = new();
+    private readonly HashSet<string> _fakeFailedOnce = new(StringComparer.Ordinal); // #323 測試縫：注入失敗「本行程第一次」之已失敗集合（跨批共用）
+    private NotesImportRunner? _importRunner;                        // 背景匯入期間之執行器（結束入口取 Snapshot）
+    private IReadOnlyList<ImportFailureSource> _importSources = Array.Empty<ImportFailureSource>(); // 本批來源
     private bool _exitPrompting;                          // 結束確認流程進行中（防系統匣「結束」等再疊一個確認框）
     private static readonly string LogPath = Path.Combine(Path.GetTempPath(), "LingoIsland-error.log");
 
@@ -110,7 +115,7 @@ public partial class App : System.Windows.Application
             () => _assessor, () => new NaudioRecorder(), () => _config.PronPassThreshold, _notify);
         _notesPage.ViewRequested += entry => ShowDetail(entry.ToResult());
         _notesPage.EntryEditRequested += (id, text) => _ = EditNoteEntryAsync(id, text); // 複查回饋：筆記編輯→重譯
-        _notesPage.ImportConfirmed += RunNotesImport; // spec#14／#309：確認頁勾選之清單→逐字既有查詢→寫入目前選取夾
+        _notesPage.ImportConfirmed += RunNotesImport; _notesPage.FailureStore = _importFailureStore; // spec#14／#309：確認頁勾選之清單→逐字既有查詢→寫入目前選取夾
         _notesPage.ImportBlockedReason = () => ImportRunning ? NotesImport.BusyHint(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0)
                                              : _optionsPage?.RestoreRunning == true ? NotesImport.RestoreBusyHint : null; // #322：重入與還原互斥
         _historyPage = new HistoryPage(_historyStore, () => _speech);
@@ -215,6 +220,7 @@ public partial class App : System.Windows.Application
                 ShowPendingImportResult();
                 return;
             }
+            RecordImportFailuresBeforeExit(); // #323：收尾跑不到——取消權杖之前以累積結果更新失敗紀錄
             _importCts?.Cancel(); // 守衛通過才取消權杖並結束（不等進行中之查詢返回；已寫入者已在磁碟）
             _main?.AllowClose();
             Shutdown();
@@ -226,6 +232,7 @@ public partial class App : System.Windows.Application
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     {
         _exitingDuringImport = true;
+        RecordImportFailuresBeforeExit(); // #323
         _importCts?.Cancel();
         _main?.AllowClose();
         base.OnSessionEnding(e);
@@ -251,6 +258,7 @@ public partial class App : System.Windows.Application
         try { if (!AskStopImport()) { return false; } }
         finally { _exitPrompting = false; }
         _exitingDuringImport = true;
+        RecordImportFailuresBeforeExit(); // #323
         _importCts?.Cancel();
         // 守備：重啟若未真的結束程式（無待套用之更新、或更新器擲例外），數秒後解除結束中，補開結果、之後之匯入照常出結果
         var guard = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
@@ -487,11 +495,11 @@ public partial class App : System.Windows.Application
     /// 其餘以 <see cref="NotesImportRunner"/> 接既有 <see cref="QueryService"/>（或測試縫之延遲假查詢）於 UI 執行緒 async 執行（不 <c>Task.Run</c>）、
     /// 主視窗 [modHmi匯入進度列] 顯示進度與剩餘時間、可取消；本方法啟動後即返回（<c>ImportConfirmed</c> 不等執行結束）。
     /// </summary>
-    private void RunNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> words)
+    private void RunNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> words, IReadOnlyList<ImportFailureSource> sources)
     {
         if (words.Count == 0) { return; }
         if (ImportRunning) { ToastNotifier.Show(NotesImport.BusyHint(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0)); return; } // 守備：同一時間至多一批（含全自備）
-        if (words.All(w => w.IsOwn)) { RunOwnOnlyNotesImport(folderId, folderName, words); return; } // #321：全部自備中譯——非 AI 動作、不查詢
+        if (words.All(w => w.IsOwn)) { RunOwnOnlyNotesImport(folderId, folderName, words, sources); return; } // #321：全部自備中譯——非 AI 動作、不查詢
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
         {
             // 起跑前預檢（與字典頁「金鑰未設定時顯示明確錯誤與設定指引」同基準）：每個字都會失敗，不讓使用者等逾時
@@ -502,17 +510,19 @@ public partial class App : System.Windows.Application
         // #322 測試縫：LINGOISLAND_IMPORT_FAKE_LOOKUP_MS 為 1–60000 之整數時以延遲假查詢取代線上查詢（端端測試用；零網路、零額度）
         var fakeMs = NotesImportRunner.FakeLookupDelayMs(Environment.GetEnvironmentVariable(NotesImportRunner.FakeLookupEnvVar));
         var lookup = fakeMs is int ms
-            ? NotesImportRunner.MakeFakeLookup(ms)
+            ? NotesImportRunner.MakeFakeLookup(ms, Environment.GetEnvironmentVariable(NotesImportRunner.FakeFailOnceEnvVar), _fakeFailedOnce) // #323：注入失敗只隨延遲假查詢生效
             : NotesImportRunner.MakeLookup(new QueryService(_config.Model, _config.TimeoutSec, _config.MaxRetries));
         var runner = new NotesImportRunner(_notesStore, lookup);
-        _ = RunBackgroundImportAsync(runner, folderId, folderName, words);
+        _ = RunBackgroundImportAsync(runner, folderId, folderName, words, sources);
     }
 
     /// <summary>背景執行之本體（#322）：設匯入執行中→進度列→await 執行器（同步進度回呼內同步筆記頁）→收尾。</summary>
-    private async Task RunBackgroundImportAsync(NotesImportRunner runner, string folderId, string folderName, IReadOnlyList<NotesImportItem> words)
+    private async Task RunBackgroundImportAsync(NotesImportRunner runner, string folderId, string folderName, IReadOnlyList<NotesImportItem> words, IReadOnlyList<ImportFailureSource> sources)
     {
         var cts = new CancellationTokenSource();
         _importCts = cts;
+        _importRunner = runner;   // #323
+        _importSources = sources; // #323
         _importCancelling = false;
         _importFolderPath = folderName;
         _importProgress = new NotesImportProgress(0, words.Count, "", words.Count(w => !w.IsOwn), null, Wrote: false);
@@ -524,13 +534,16 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex) // 守備：執行器本身不往外擲（中斷以 Error 回傳）
         {
-            outcome = new NotesImportOutcome(0, 0, Array.Empty<string>(), Array.Empty<(string, string)>()) { Error = ex.Message };
+            outcome = runner.Snapshot() with { Cancelled = false, Error = ex.Message }; // #323：保留已累積之逐字結果（失敗字照記）
         }
         finally
         {
             _importCts = null; // 先解除再 Dispose：之後之 Cancel 呼叫皆落空
             cts.Dispose();
+            _importRunner = null; // #323
+            _importSources = Array.Empty<ImportFailureSource>();
         }
+        RecordImportFailures(sources, outcome); // #323：先於結果呈現之一切分支（含結束中、最小化延後）
         try { FinishBackgroundImport(outcome, folderName); }
         catch (Exception ex)
         {
@@ -583,6 +596,23 @@ public partial class App : System.Windows.Application
         ShowPendingImportResult();
     }
 
+    /// <summary>
+    /// 失敗紀錄更新（#323 ③）：成功＝加入＋更新之字、失敗＝<see cref="NotesImportOutcome.Failed"/> 之字；不擲出——紀錄之成敗不影響匯入與結果呈現。
+    /// </summary>
+    private void RecordImportFailures(IReadOnlyList<ImportFailureSource> sources, NotesImportOutcome outcome)
+    {
+        try { _importFailureStore.Update(sources, outcome.AddedWords.Concat(outcome.UpdatedWords), outcome.Failed.Select(f => f.Word), DateTimeOffset.UtcNow); }
+        catch (Exception) { /* 守備：Update 本身不擲出 */ }
+    }
+
+    /// <summary>結束 app 之入口（#323 ③）：匯入執行中才以執行器累積之逐字結果更新失敗紀錄（取消權杖之前；規則冪等）。</summary>
+    private void RecordImportFailuresBeforeExit()
+    {
+        if (!ImportRunning || _importRunner is not { } runner) { return; }
+        try { RecordImportFailures(_importSources, runner.Snapshot()); }
+        catch (Exception) { /* 不阻擋結束 */ }
+    }
+
     private bool MainShowing() => _main is { IsVisible: true } m && m.WindowState != WindowState.Minimized;
 
     /// <summary>開待開之結果視窗（#322）：主視窗可見且非最小化、非結束中才開；不搶焦點；同一時間至多一個（先關舊的）。</summary>
@@ -615,10 +645,11 @@ public partial class App : System.Windows.Application
     /// 匯入清單之全自備中譯分支（spec#14／#321）：勾選之字全部帶 csv 第二欄自備中譯——不檢金鑰、不建查詢服務、不開進度列
     /// （非 AI 動作）；執行器以「被呼叫即擲例外」之守衛委派建構、同步一次載入一次存檔；結果以 [modHmi匯入結果視窗] 呈現（#322，取代 <c>MessageBox</c>）。
     /// </summary>
-    private void RunOwnOnlyNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> items)
+    private void RunOwnOnlyNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> items, IReadOnlyList<ImportFailureSource> sources)
     {
         var runner = new NotesImportRunner(_notesStore, NotesImportRunner.NoLookup);
         var outcome = runner.RunOwnOnly(items, folderId, NoteDefaults.ColorHex);
+        RecordImportFailures(sources, outcome); // #323
         _notesPage?.Reload();
         _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
         _pendingImportResult = (outcome.Ending, NotesImport.ResultBody(outcome, folderName));
