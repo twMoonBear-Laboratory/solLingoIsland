@@ -36,7 +36,7 @@
   <text x="163" y="127" font-size="11" text-anchor="middle" fill="#5C3346">全不選</text>
   <rect x="206" y="117" width="12" height="12" rx="2" fill="#FFFFFF" stroke="#999"/>
   <text x="224" y="127" font-size="11" fill="#5C3346">有自備中譯的字也改查線上</text>
-  <text x="774" y="127" font-size="11" text-anchor="end" fill="#8A5A6D">共 5 列：新字 3、已在筆記 1、重複 1、自備中譯 3</text>
+  <text x="774" y="127" font-size="11" text-anchor="end" fill="#8A5A6D">共 5 列：新字 3、已在筆記 1、重複 1、有自備中譯 3</text>
 
   <!-- 彙總確認表：勾｜單字／片語｜來源｜中譯來源｜狀態 -->
   <rect x="46" y="142" width="728" height="222" rx="6" fill="#FFFFFF" stroke="#E8A9C0"/>
@@ -59,7 +59,7 @@
   <text x="94" y="216" font-size="12" fill="#777">banana</text>
   <text x="250" y="216" font-size="11" fill="#8A5A6D">unit1.csv</text>
   <text x="350" y="216" font-size="11" fill="#2F6A8A">自備中譯：香蕉</text>
-  <text x="510" y="216" font-size="11" fill="#A06A20">已在筆記「第一冊生詞」（勾選＝以自備中譯更新）</text>
+  <text x="510" y="216" font-size="11" fill="#A06A20">勾選＝以自備中譯更新；已在筆記「第一冊生詞」</text>
   <!-- 列 3：新字、第二欄空白→線上查詢 -->
   <rect x="56" y="235" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
   <text x="58" y="245" font-size="10" fill="#FFFFFF">✓</text>
