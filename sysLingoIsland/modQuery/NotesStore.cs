@@ -50,19 +50,19 @@ public enum NoteAddResult { Added, AlreadyExists, Empty }
 /// <summary>自備中譯批次寫入之逐字結果（spec#14／#321）：加入新筆、以自備中譯更新既有筆（只換中譯）、或原文為空。</summary>
 public enum OwnTranslationWriteResult { Added, Updated, Empty }
 
+/// <summary>筆記檔內容損毀（無法解析，#322）：與「暫時讀不到（被鎖）」區分——重試不會好，須明訊並指引自備份還原。</summary>
+public sealed class NotesFileCorruptException : IOException
+{
+    public NotesFileCorruptException(Exception inner)
+        : base("筆記檔內容已損毀、無法讀取——請到「選項」分頁「資料備份與搬遷」以「匯入資料…」還原備份", inner) { }
+}
+
 /// <summary>
 /// 我的筆記本機儲存（[modQuery模組] 我的筆記儲存契約，spec#7；Issue #34 樹化）。存
 /// <c>%APPDATA%\LingoIsland\notes.json</c>。資料夾為**多層樹**（向後相容舊平面）；加入以英文原文正規化
 /// 跨全樹去重；資料夾 CRUD（含子夾）、條目排序、節點移動（防移入自身/子孫成環）皆為不依賴 UI 之純函式、可單元測試。
 /// 讀取失敗退空結構、寫入失敗靜默降級——皆不致命；金鑰不入筆記；不受歷史清除影響。
 /// </summary>
-/// <summary>筆記檔內容損毀（無法解析，#322）：與「暫時讀不到（被鎖）」區分——重試不會好，須明訊並指引自備份還原。</summary>
-public sealed class NotesFileCorruptException : IOException
-{
-    public NotesFileCorruptException(Exception inner)
-        : base("筆記檔內容已損毀、無法讀取（" + inner.Message + "）——請到「選項」分頁「資料備份與搬遷」以「匯入資料…」還原備份", inner) { }
-}
-
 public sealed class NotesStore
 {
     public const string DefaultFolderName = "My Notes";

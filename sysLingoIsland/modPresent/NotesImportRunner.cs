@@ -220,6 +220,7 @@ public sealed class NotesImportRunner
                     }
                 }
                 catch (OperationCanceledException) { cancelled = true; break; }
+                catch (NotesFileCorruptException ex) { acc.Failed.Add((w, ex.Message)); error = ex.Message; break; } // #322：內容損毀不會自己好——停下，不再為其餘字付費查詢
                 catch (IOException ex) { acc.Failed.Add((w, ex.Message)); }   // #322：筆記檔讀寫失敗（被鎖）——計該字失敗，但不算入金鑰／網路之早停連續失敗
                 catch (Exception ex) { acc.Failed.Add((w, ex.Message)); streak++; if (firstError.Length == 0) { firstError = ex.Message; } }   // QueryException 等——一字失敗不影響其他字
                 eta.Record(_clock() - started); // 成功或失敗皆為一筆樣本（逾時與重試反映網速）

@@ -77,7 +77,7 @@ public static class NotesPageSync
         }
 
         /// <summary>任何原因之整區重繪（切夾、整頁重載）皆使畫面與資料一致。</summary>
-        public void MarkRendered() => Stale = false;
+        public void MarkRendered() { Stale = false; _queued = false; }
     }
 
     private static int IndexOf(IReadOnlyList<string> ids, string id)

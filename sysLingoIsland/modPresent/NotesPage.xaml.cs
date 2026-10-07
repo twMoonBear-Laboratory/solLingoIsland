@@ -139,7 +139,9 @@ public partial class NotesPage : UserControl
         _recorderFactory = recorderFactory;
         _threshold = passThreshold;
         _notify = notify;
-        _data = _store.LoadEnsured();
+        // #322：啟動亦嚴格讀檔——被鎖或損毀時不得以空結構示人、更不得在第一次整理時整份覆寫；標記待同步，寫入前先重試或明訊
+        if (_store.TryLoadStrict(out var initial, out var initErr, out var initCorrupt)) { _data = initial; }
+        else { _data = new NotesData(); NotesStore.Ensure(_data); _syncPending = true; _syncError = initErr; _syncCorrupt = initCorrupt; }
 
         NewFolderBtn.Click += (_, _) => CreateFolder(parent: null); // 一律建頂層；子資料夾走節點右鍵選單（檔案總管慣例）
         ImportListBtn.Click += (_, _) => BeginImportList();           // spec#14／#309：選檔→預掃描→確認頁→交 App 逐字查詢加入
@@ -883,7 +885,7 @@ public partial class NotesPage : UserControl
         f = NotesStore.FindFolder(_data, f.Id) ?? f; // #322：以 Id 取現行資料（條目數為最新）
         var shownCount = SubtreeCount(f);             // 確認框開著期間匯入寫進本夾或其子夾即再問一次
         var msg = (f.Entries.Count > 0 || f.Folders.Count > 0)
-            ? $"確定要刪除資料夾「{f.Name}」及其子資料夾與 {f.Entries.Count} 則筆記嗎？此操作無法復原。"
+            ? $"確定要刪除資料夾「{f.Name}」及其子資料夾與共 {SubtreeEntries(f)} 則筆記嗎？此操作無法復原。"
             : $"確定要刪除資料夾「{f.Name}」嗎？";
         if (MessageBox.Show(msg, "刪除資料夾", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
         {
@@ -892,7 +894,7 @@ public partial class NotesPage : UserControl
         if (!EnsureFresh()) { return; } // #322
         // #322：確認框開著期間背景匯入可能又寫進此夾——影響範圍變了就如實再問一次
         if (NotesStore.FindFolder(_data, f.Id) is { } now && SubtreeCount(now) != shownCount
-            && MessageBox.Show($"資料夾「{now.Name}」（或其子資料夾）剛有匯入的新字，現在有 {now.Entries.Count} 則筆記——確定要連同子資料夾一起刪除嗎？此操作無法復原。",
+            && MessageBox.Show($"資料夾「{now.Name}」（或其子資料夾）剛有匯入的新字，現在連同子資料夾共有 {SubtreeEntries(now)} 則筆記——確定要一起刪除嗎？此操作無法復原。",
                                "刪除資料夾", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
         {
             return;
@@ -902,6 +904,7 @@ public partial class NotesPage : UserControl
         Persist();
     }
 
+    private static int SubtreeEntries(NoteFolder f) => f.Entries.Count + f.Folders.Sum(SubtreeEntries);
     private static int SubtreeCount(NoteFolder f) => f.Entries.Count + f.Folders.Sum(SubtreeCount) + f.Folders.Count;
 
     // ---- 資料夾/條目拖曳移動（節點移動如檔案總管；防環由 store；目標夾高亮回饋） ----
@@ -1049,7 +1052,7 @@ public partial class NotesPage : UserControl
         //（原先未擷取，往左一離開握把即收不到移動事件、門檻跨不過，須先上下拖曳才生效）。
         handle.PreviewMouseLeftButtonDown += (_, ev) => { _entryDrag = entry; _entryStart = ev.GetPosition(null); handle.CaptureMouse(); };
         handle.PreviewMouseLeftButtonUp += (_, _) => { _entryDrag = null; handle.ReleaseMouseCapture(); }; // 放開即清＋釋放擷取（對稱防殘留）
-        handle.LostMouseCapture += (_, _) => { if (_entryDrag == entry && System.Windows.Input.Mouse.LeftButton != MouseButtonState.Pressed) { _entryDrag = null; FlushDeferred(); } }; // #322：擷取遺失（Alt+Tab、他窗奪焦）不卡住延後重繪
+        handle.LostMouseCapture += (_, _) => { if (_entryDrag == entry) { _entryDrag = null; FlushDeferred(); } }; // #322：擷取遺失（Alt+Tab、他窗奪焦）不卡住延後重繪
         handle.PreviewMouseMove += OnEntryHandleMove;
         Grid.SetColumn(handle, 0);
         grid.Children.Add(handle);

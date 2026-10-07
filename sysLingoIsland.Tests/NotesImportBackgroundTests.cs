@@ -457,6 +457,29 @@ public class NotesImportBackgroundTests
         finally { File.Delete(path); File.Delete(path + ".tmp"); }
     }
 
+    [Fact]
+    public async Task CorruptNotesFile_RunnerStops_NoFurtherPaidQueries()
+    {
+        var path = TempPath();
+        try
+        {
+            var (store, folderId) = Seed(path);
+            var calls = new List<string>();
+            Func<string, CancellationToken, Task<QueryResult>> lookup = (w, _) =>
+            {
+                calls.Add(w);
+                if (w == "w2") { File.WriteAllText(path, "{ broken"); }   // 匯入途中檔案損毀
+                return Task.FromResult(new QueryResult(w, "", "譯"));
+            };
+            var outcome = await new NotesImportRunner(store, lookup).RunAsync(new[] { "w1", "w2", "w3", "w4" }.Select(w => new NotesImportItem(w)).ToList(), folderId, null, null, CancellationToken.None);
+            Assert.Equal(new[] { "w1", "w2" }, calls);                              // 損毀後不再為其餘字付費查詢
+            Assert.Equal(NotesImportEnding.Interrupted, outcome.Ending);
+            Assert.Contains("損毀", outcome.Error);
+            Assert.Equal(new[] { "w1" }, outcome.AddedWords);
+        }
+        finally { File.Delete(path); }
+    }
+
     // ---- 結構斷言（讀原始碼純文字）----
 
     [Fact]
