@@ -22,7 +22,7 @@
   <rect x="196" y="144" width="428" height="210" rx="4" fill="#FFF7FA" stroke="#F4C2D0"/>
   <text x="206" y="166" font-size="12.5" fill="#3A2C33">匯入已取消：已加入 37 字到「英文課 › Unit 4」</text>
   <text x="206" y="184" font-size="12.5" fill="#3A2C33">（orbit、comet、nebula、galaxy … 等 37 字）、失敗 2 字。</text>
-  <text x="206" y="210" font-size="12.5" fill="#3A2C33">失敗（其餘字不受影響；可再匯入一次只勾這幾個）：</text>
+  <text x="206" y="210" font-size="12.5" fill="#3A2C33">失敗（其餘字不受影響；再匯入同一份清單時可只勾這幾個）：</text>
   <text x="206" y="228" font-size="12.5" fill="#3A2C33">· quasar——查詢逾時</text>
   <text x="206" y="246" font-size="12.5" fill="#3A2C33">· pulsar——查詢沒有回傳內容</text>
   <text x="206" y="272" font-size="12.5" fill="#3A2C33">（已取消——已加入的字保留，其餘未加入。）</text>
