@@ -328,9 +328,11 @@ public static class NotesImport
     /// <summary>讀檔例外之白話原因（#320）：常見者對應短中文，其餘沿用例外訊息。</summary>
     public static string ReasonOf(Exception ex) => ex switch
     {
-        FileNotFoundException or DirectoryNotFoundException => "找不到這個檔（可能已被移動或刪除）",
+        FileNotFoundException or DirectoryNotFoundException or DriveNotFoundException => "找不到這個檔（可能已被移動、刪除或磁碟已拔除）",
         UnauthorizedAccessException => "沒有讀取權限",
-        IOException => "被其他程式開著或鎖住（例如 Excel），請關閉後再試",
+        IOException io when (io.HResult & 0xFFFF) is 0x20 or 0x21 => "被其他程式開著或鎖住（例如 Excel），請關閉後再試", // 共用／鎖定違規
+        PathTooLongException => "路徑太長",
+        IOException => "讀取失敗（" + ex.Message + "）",
         _ => ex.Message,
     };
 

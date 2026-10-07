@@ -79,7 +79,7 @@ public partial class NotesImportWindow : Window
             IsEnabled = e.IsSelectable,
             Margin = new Thickness(10, 4, 0, 4),
             VerticalAlignment = VerticalAlignment.Center,
-            ToolTip = e.IsSelectable ? null : "重複的字只留第一筆（" + NotesImport.StatusText(e) + "），不能另外勾選",
+            ToolTip = e.IsSelectable ? null : NotesImport.StatusText(e) + "——不能另外勾選",
         };
         AutomationProperties.SetAutomationId(box, RowAutomationIdPrefix + index);
         AutomationProperties.SetName(box, e.Text);

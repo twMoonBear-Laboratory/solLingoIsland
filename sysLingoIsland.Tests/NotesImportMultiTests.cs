@@ -135,7 +135,7 @@ public class NotesImportMultiTests
     [Fact]
     public void Load_ReadThrows_ExcludedAsUnreadable()
     {
-        var r = NotesImport.LoadSources(new[] { @"C:\w\locked.txt" }, _ => 5, _ => throw new IOException("The process cannot access the file because it is being used by another process."));
+        var r = NotesImport.LoadSources(new[] { @"C:\w\locked.txt" }, _ => 5, _ => throw new IOException("The process cannot access the file because it is being used by another process.", unchecked((int)0x80070020)));
         Assert.Empty(r.Sources);
         Assert.Equal("讀不到：被其他程式開著或鎖住（例如 Excel），請關閉後再試", r.Excluded.Single().Reason); // 不露英文例外與完整路徑
     }
@@ -147,6 +147,10 @@ public class NotesImportMultiTests
         Assert.StartsWith("找不到", NotesImport.ReasonOf(new DirectoryNotFoundException("x")));
         Assert.Equal("沒有讀取權限", NotesImport.ReasonOf(new UnauthorizedAccessException("x")));
         Assert.Equal("其他", NotesImport.ReasonOf(new InvalidOperationException("其他")));
+        Assert.StartsWith("找不到", NotesImport.ReasonOf(new DriveNotFoundException("x")));
+        Assert.StartsWith("被其他程式開著或鎖住", NotesImport.ReasonOf(new IOException("x", unchecked((int)0x80070021)))); // 鎖定違規
+        Assert.Equal("路徑太長", NotesImport.ReasonOf(new PathTooLongException("x")));
+        Assert.Equal("讀取失敗（找不到網路名稱）", NotesImport.ReasonOf(new IOException("找不到網路名稱", unchecked((int)0x80070043)))); // 非鎖定之 IO 錯不得誤報被 Excel 鎖住
     }
 
     [Fact]
