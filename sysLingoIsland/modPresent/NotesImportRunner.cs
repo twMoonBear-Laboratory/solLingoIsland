@@ -14,6 +14,9 @@ public sealed record NotesImportOutcome(int Added, int Updated, IReadOnlyList<st
     /// <summary>已更新之字（依寫入順序；#323：與 <see cref="AddedWords"/> 同為「成功」，供失敗紀錄剔除）。</summary>
     public IReadOnlyList<string> UpdatedWords { get; init; } = Array.Empty<string>();
 
+    /// <summary>寫入日誌（#324 整批撤銷 ①）：每次實際落地之寫入一筆，依寫入順序；撤銷快照即此。</summary>
+    public IReadOnlyList<NoteWriteRecord> Journal { get; init; } = Array.Empty<NoteWriteRecord>();
+
     /// <summary>目標夾於結束時已不存在——結果表與 toast 須如實說明，不得仍寫原夾名。</summary>
     public bool TargetFolderMissing { get; init; }
 
@@ -233,12 +236,12 @@ public sealed class NotesImportRunner
                         // 寫入與確認頁判定須同鍵：一律以清單上的使用者原字為 Original（AI 回之原文偶有拼寫整形，若照用會使
                         // 標「新字」者被去重擋下去更新別筆、或勾「已在筆記」者找不到原筆——付費後結果偏離確認頁所示）
                         var toSave = r with { Original = w };
-                        switch (_store.AddToFolderAndSave(toSave, folderId, colorHex, _now(), batchKeys: acc.BatchKeys)) // #322：本批之字依清單序相連
+                        switch (_store.AddToFolderAndSave(toSave, folderId, colorHex, _now(), batchKeys: acc.BatchKeys, onWritten: acc.Journal.Add)) // #322：本批之字依清單序相連；#324：落地即記日誌
                         {
                             case NoteAddResult.Added: acc.Added++; acc.AddedWords.Add(w); acc.BatchKeys.Add(NoteEntry.KeyOf(w)); streak = 0; onlineOk++; wrote = true; break;
                             case NoteAddResult.AlreadyExists:
                                 // 勾選「已在筆記」列之語意：重新查詢並更新原筆（留原夾、不重複建立、保留練習分數）；原筆已不在→略過
-                                if (_store.RefreshEntryByKeyAndSave(toSave)) { acc.Updated++; acc.UpdatedWords.Add(w); onlineOk++; wrote = true; } else { acc.Skipped.Add(w); }
+                                if (_store.RefreshEntryByKeyAndSave(toSave, acc.Journal.Add)) { acc.Updated++; acc.UpdatedWords.Add(w); onlineOk++; wrote = true; } else { acc.Skipped.Add(w); }
                                 streak = 0;
                                 break;
                             default: acc.Failed.Add((w, "沒有可儲存的內容")); streak++; if (firstError.Length == 0) { firstError = "沒有可儲存的內容"; } break;
@@ -290,6 +293,7 @@ public sealed class NotesImportRunner
             Cancelled = true,
             AddedWords = a.AddedWords.ToList(),
             UpdatedWords = a.UpdatedWords.ToList(),
+            Journal = a.Journal.ToList(),
             OwnTranslationUsed = a.Own,
         };
     }
@@ -299,6 +303,7 @@ public sealed class NotesImportRunner
         public int Added, Updated, Own;
         public readonly List<string> AddedWords = new();
         public readonly List<string> UpdatedWords = new(); // #323
+        public readonly List<NoteWriteRecord> Journal = new(); // #324
         public readonly List<string> BatchKeys = new(); // #322：本批已加入之字之去重鍵（寫入順序）
         public readonly List<string> Skipped = new();
         public readonly List<(string Word, string Reason)> Failed = new();
@@ -310,7 +315,7 @@ public sealed class NotesImportRunner
         if (seg.Count == 0) { return; }
         try
         {
-            var results = _store.AddOrRefreshOwnTranslationsAndSave(seg.Select(x => new QueryResult(x.Text, "", x.Own)).ToList(), folderId, colorHex, _now(), acc.Added, acc.BatchKeys);
+            var results = _store.AddOrRefreshOwnTranslationsAndSave(seg.Select(x => new QueryResult(x.Text, "", x.Own)).ToList(), folderId, colorHex, _now(), acc.Added, acc.BatchKeys, acc.Journal.Add);
             for (var k = 0; k < seg.Count; k++)
             {
                 switch (results[k])
@@ -337,6 +342,7 @@ public sealed class NotesImportRunner
             Cancelled = cancelled,
             AddedWords = acc.AddedWords,
             UpdatedWords = acc.UpdatedWords,
+            Journal = acc.Journal,
             TargetFolderMissing = missing,
             FallbackFolder = missing ? NotesStore.FolderPath(dEnd, dEnd.Folders[0].Id) : "",
             OwnTranslationUsed = acc.Own,

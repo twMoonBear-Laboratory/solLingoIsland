@@ -54,6 +54,21 @@
                 AutomationProperties.AutomationId="NotesImportBtn"
                 HorizontalAlignment="Left" Padding="10,4"
                 ToolTip="把 .txt（每行一字）或 .csv（第一欄英文、第二欄可放自備中譯）的英文清單匯入目前選取的資料夾——先選左側資料夾再按；可多選，也可把檔案直接拖進本頁；匯入前會先列出確認表"/>
+        <!-- #324：再開最近一次匯入之結果視窗（可在那裡撤銷）；本次啟動後第一批收尾前 Collapsed，背景匯入進行中停用 -->
+        <Button x:Name="LastResultBtn" Content="上次匯入結果" Padding="10,4" Margin="6,0,0,0" HorizontalAlignment="Left"
+                Visibility="Collapsed" ToolTipService.ShowOnDisabled="True"
+                AutomationProperties.AutomationId="NotesImportLastResultBtn">
+          <Button.Style>
+            <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
+              <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter Property="Opacity" Value="0.45"/>
+                  <Setter Property="Cursor" Value="Arrow"/>
+                </Trigger>
+              </Style.Triggers>
+            </Style>
+          </Button.Style>
+        </Button>
       </WrapPanel>
       <Border Grid.Row="1" Style="{StaticResource Card}">
         <!-- USR：長資料夾名自動分行——停用水平捲軸使列寬受欄寬約束（配合 MakeItem 列拉伸＋名稱 TextWrapping） -->

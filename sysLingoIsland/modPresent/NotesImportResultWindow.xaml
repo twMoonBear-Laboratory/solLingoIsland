@@ -7,12 +7,14 @@
         ResizeMode="CanResizeWithGrip" WindowStyle="ToolWindow"
         AutomationProperties.AutomationId="NotesImportResultWindow"
         Background="{StaticResource PinkBg}">
-  <!-- [modHmi匯入結果視窗]（spec#14，#322）：非模態、不搶焦點（ShowActivated=False）、可捲動可選取複製之結果表；標頭＝匯入完成／匯入已取消／匯入中斷 -->
+  <!-- [modHmi匯入結果視窗]（spec#14，#322）：非模態、不搶焦點（ShowActivated=False）、可捲動可選取複製之結果表；標頭＝匯入完成／匯入已取消／匯入中斷（#324：已撤銷本次匯入）；
+       #324：結果表下一列＝撤銷說明、底列＝撤銷本次匯入＋確定 -->
   <Border Style="{StaticResource Card}" Margin="12" Padding="12">
     <Grid>
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto"/>
         <RowDefinition Height="*"/>
+        <RowDefinition Height="Auto"/>
         <RowDefinition Height="Auto"/>
       </Grid.RowDefinitions>
       <TextBlock Grid.Row="0" x:Name="HeaderText" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,8"
@@ -21,8 +23,26 @@
                VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                BorderThickness="1" BorderBrush="{StaticResource PinkAccent}" Background="#FFF7FA" Foreground="#3A2C33"
                Padding="6" AutomationProperties.AutomationId="NotesImportResultText"/>
-      <Button Grid.Row="2" x:Name="OkBtn" Content="確定" Style="{StaticResource PinkButton}" IsDefault="True" IsCancel="True"
-              HorizontalAlignment="Right" Margin="0,10,0,0" MinWidth="88" AutomationProperties.AutomationId="NotesImportResultOk"/>
+      <TextBlock Grid.Row="2" x:Name="UndoHint" FontSize="11" Foreground="#8A7A82" TextWrapping="Wrap" Margin="0,8,0,0"
+                 AutomationProperties.AutomationId="NotesImportResultUndoHint"/>
+      <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+        <Button x:Name="UndoBtn" Padding="10,4" Margin="0,0,8,0" MinWidth="88"
+                ToolTipService.ShowOnDisabled="True"
+                AutomationProperties.AutomationId="NotesImportResultUndo">
+          <Button.Style>
+            <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
+              <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter Property="Opacity" Value="0.45"/>
+                  <Setter Property="Cursor" Value="Arrow"/>
+                </Trigger>
+              </Style.Triggers>
+            </Style>
+          </Button.Style>
+        </Button>
+        <Button x:Name="OkBtn" Content="確定" Style="{StaticResource PinkButton}" IsDefault="True" IsCancel="True"
+                MinWidth="88" AutomationProperties.AutomationId="NotesImportResultOk"/>
+      </StackPanel>
     </Grid>
   </Border>
 </Window>

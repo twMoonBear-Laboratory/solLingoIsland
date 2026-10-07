@@ -145,6 +145,7 @@ public partial class NotesPage : UserControl
 
         NewFolderBtn.Click += (_, _) => CreateFolder(parent: null); // 一律建頂層；子資料夾走節點右鍵選單（檔案總管慣例）
         ImportListBtn.Click += (_, _) => BeginImportList();           // spec#14／#309：選檔→預掃描→確認頁→交 App 逐字查詢加入
+        LastResultBtn.Click += (_, _) => LastImportResultRequested?.Invoke(); // #324：再開上次匯入結果（撤銷入口在結果視窗）
         PreviewDragEnter += OnFileDragEnter;                          // #320：整頁接受 .txt／.csv 檔案拖放（Preview 穿隧先攔 FileDrop，非 FileDrop 不碰）
         PreviewDragOver += OnFileDragOver;
         PreviewDragLeave += OnFileDragLeave;
@@ -341,6 +342,20 @@ public partial class NotesPage : UserControl
     /// </summary>
     /// <remarks>#323：第 4 參數＝本批來源（每檔完整路徑＋原字），供 App 收尾更新失敗紀錄。</remarks>
     public event Action<string, string, IReadOnlyList<NotesImportItem>, IReadOnlyList<ImportFailureSource>>? ImportConfirmed;
+
+    /// <summary>[上次匯入結果] 按下（#324）：App 再開最近一次匯入之結果視窗。</summary>
+    public event Action? LastImportResultRequested;
+
+    /// <summary>[上次匯入結果] 之顯示與可按（#324 ③）：<paramref name="available"/>＝本次啟動後已有「上次匯入」；<paramref name="importRunning"/>＝背景匯入進行中（停用）。</summary>
+    public void SetLastImportResult(bool available, bool importRunning)
+    {
+        LastResultBtn.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+        LastResultBtn.IsEnabled = available && !importRunning;
+        LastResultBtn.ToolTip = importRunning ? NotesImportUndoText.LastResultBusyToolTip : NotesImportUndoText.LastResultToolTip;
+    }
+
+    /// <summary>撤銷寫入後之同步（#324 ⑥）：同匯入收尾——以磁碟現況換掉記憶體資料、補做延後之重繪，讀不到即標記待同步並重試。</summary>
+    public void SyncAfterUndoWrite() => FinishBackgroundImport();
 
     /// <summary>匯入失敗紀錄（#323）：預掃描時讀本批來源檔之上次失敗字（讀不到／損毀＝無紀錄、不擋匯入）。</summary>
     public ImportFailureStore FailureStore { get; set; } = new();
@@ -1285,7 +1300,12 @@ public partial class NotesPage : UserControl
             var result = await assessor.AssessAsync(wav, cell.Entry.Original);
             var threshold = _threshold();
             if (!EnsureFresh()) { RestoreBox(cell); return; } // #322：讀不到筆記檔時不以舊資料寫回
-            NotesStore.SetPracticeScore(_data, cell.Entry.Id, result.Score); // 取最佳分
+            if (!NotesStore.SetPracticeScore(_data, cell.Entry.Id, result.Score)) // 取最佳分
+            {
+                ToastNotifier.Show(NotesImportUndoText.EntryGoneScoreToast); // #324 ⑥：條目已被撤銷或刪除——不靜默
+                RenderFolder();
+                return;
+            }
             SaveData();
             if (IsBoxLive(cell.Box))
             {

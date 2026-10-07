@@ -50,7 +50,10 @@ public partial class App : System.Windows.Application
     private string _importFolderPath = "";                // 確認當下之目標夾路徑（匯入途中改夾名不追改）
     private bool _importCancelling;                       // 已按「取消」、等執行器返回
     private bool _exitingDuringImport;                    // 結束確認選「是」後之結束中（收尾不開結果視窗、不 toast）
-    private (NotesImportEnding Ending, string Body)? _pendingImportResult; // 待開之結果（主視窗最小化／結束中時延後）
+    private NotesImportLastResult? _pendingImportResult; // 待開之結果（主視窗最小化／結束中時延後）
+    // ---- #324 整批撤銷（契約「整批撤銷」③）----
+    private NotesImportLastResult? _lastImport;           // 上次匯入（結局、結果全文、寫入日誌、撤銷狀態）；app 重啟前有效
+    private bool _undoPrompting;                          // 撤銷確認框開著（期間新一批收尾之結果視窗延後開）
     private NotesImportResultWindow? _importResultWindow; // 同一時間至多一個
     private bool ImportRunning => _importCts is not null;
     // ---- #323 只勾上次失敗字（契約「只勾上次失敗字」③⑧）----
@@ -116,6 +119,7 @@ public partial class App : System.Windows.Application
         _notesPage.ViewRequested += entry => ShowDetail(entry.ToResult());
         _notesPage.EntryEditRequested += (id, text) => _ = EditNoteEntryAsync(id, text); // 複查回饋：筆記編輯→重譯
         _notesPage.ImportConfirmed += RunNotesImport; _notesPage.FailureStore = _importFailureStore; // spec#14／#309：確認頁勾選之清單→逐字既有查詢→寫入目前選取夾
+        _notesPage.LastImportResultRequested += ShowLastImportResult; // #324：筆記頁「上次匯入結果」再開結果視窗
         _notesPage.ImportBlockedReason = () => ImportRunning ? NotesImport.BusyHint(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0)
                                              : _optionsPage?.RestoreRunning == true ? NotesImport.RestoreBusyHint : null; // #322：重入與還原互斥
         _historyPage = new HistoryPage(_historyStore, () => _speech);
@@ -521,6 +525,7 @@ public partial class App : System.Windows.Application
     {
         var cts = new CancellationTokenSource();
         _importCts = cts;
+        BeginNewImportForUndo(); // #324 ③：執行器即將開始——上一批之撤銷失效
         _importRunner = runner;   // #323
         _importSources = sources; // #323
         _importCancelling = false;
@@ -544,7 +549,11 @@ public partial class App : System.Windows.Application
             _importSources = Array.Empty<ImportFailureSource>();
         }
         RecordImportFailures(sources, outcome); // #323：先於結果呈現之一切分支（含結束中、最小化延後）
-        try { FinishBackgroundImport(outcome, folderName); }
+        try
+        {
+            SetLastImport(outcome, folderName); // #324 ③：同處、先於結果呈現之一切分支（收尾例外防護內）
+            FinishBackgroundImport(outcome, folderName);
+        }
         catch (Exception ex)
         {
             try { File.WriteAllText(LogPath, DateTime.Now + "\n" + ex); } catch { /* log 寫入失敗不致命 */ }
@@ -585,7 +594,7 @@ public partial class App : System.Windows.Application
         _main?.HideImportProgress();
         _notesPage?.FinishBackgroundImport();
         _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
-        _pendingImportResult = (outcome.Ending, NotesImport.ResultBody(outcome, folderName));
+        _pendingImportResult = _lastImport; // #324：上次匯入已於收尾先設
         if (_exitingDuringImport) { return; } // 結束中：不開結果視窗、不 toast（守衛取消時於 ExitApp 補開）
         if (!MainShowing())
         {
@@ -618,14 +627,108 @@ public partial class App : System.Windows.Application
     /// <summary>開待開之結果視窗（#322）：主視窗可見且非最小化、非結束中才開；不搶焦點；同一時間至多一個（先關舊的）。</summary>
     private void ShowPendingImportResult()
     {
-        if (_pendingImportResult is not { } r || _exitingDuringImport || !MainShowing()) { return; }
+        if (_pendingImportResult is not { } r || _exitingDuringImport || _undoPrompting || !MainShowing()) { return; } // #324：撤銷確認框開著時延後（舊視窗是其 owner）
         _pendingImportResult = null;
+        OpenImportResultWindow(r);
+    }
+
+    private void OpenImportResultWindow(NotesImportLastResult model)
+    {
         _importResultWindow?.Close();
-        var win = new NotesImportResultWindow(r.Ending, r.Body) { Owner = _main };
+        var win = new NotesImportResultWindow(model) { Owner = _main };
+        win.UndoRequested += UndoLastImport; // #324
         win.Closed += (_, _) => { if (ReferenceEquals(_importResultWindow, win)) { _importResultWindow = null; } };
         _importResultWindow = win;
         win.Show();
     }
+
+    /// <summary>上次匯入之設定（#324 ③）：每批收尾以本批取代，筆記頁 [上次匯入結果] 隨之顯示。</summary>
+    private void SetLastImport(NotesImportOutcome outcome, string folderName)
+    {
+        _lastImport = new NotesImportLastResult(outcome.Ending, NotesImport.ResultBody(outcome, folderName), outcome.Journal);
+        _notesPage?.SetLastImportResult(available: true, importRunning: ImportRunning);
+    }
+
+    /// <summary>執行器即將開始（#324 ③）：上一批由可撤轉已失效（開著之舊結果視窗即時停用）、[上次匯入結果] 依匯入執行中停用。</summary>
+    private void BeginNewImportForUndo()
+    {
+        _lastImport?.Expire();
+        _notesPage?.SetLastImportResult(available: _lastImport is not null, importRunning: true);
+    }
+
+    /// <summary>筆記頁 [上次匯入結果]（#324 ③）：已開著同一份即帶到前景，否則再開。</summary>
+    private void ShowLastImportResult()
+    {
+        if (_lastImport is not { } m || ImportRunning || _undoPrompting) { return; } // #324 ⑦：撤銷對話框開著時不關其 owner
+        if (_importResultWindow is { } w && ReferenceEquals(w.Model, m))
+        {
+            if (w.WindowState == WindowState.Minimized) { w.WindowState = WindowState.Normal; }
+            w.Activate();
+            return;
+        }
+        OpenImportResultWindow(m);
+    }
+
+    /// <summary>
+    /// 撤銷本次匯入（[modPresent模組] 筆記清單匯入契約「整批撤銷」⑤–⑧，#324）：不受理條件→試算→（全部跳過即無可撤）→確認（預設否）→
+    /// 重查有效與互斥→一次讀改寫（原子存檔）→同一呼叫內同步筆記頁→完成提示。失敗退路皆筆記檔不變、狀態不變。不動失敗紀錄（⑨）。
+    /// </summary>
+    private void UndoLastImport(NotesImportResultWindow owner)
+    {
+        if (!owner.Model.CanUndo || _undoPrompting) { return; }
+        // ⑦：撤銷流程之一切對話框（確認與各提示）皆以結果視窗為 owner——開著期間不關它：新一批收尾之結果視窗延後、[上次匯入結果] 不受理
+        _undoPrompting = true;
+        try { UndoLastImportCore(owner); }
+        finally
+        {
+            _undoPrompting = false;
+            ShowPendingImportResult(); // 期間延後之新結果於此補開
+        }
+    }
+
+    private void UndoLastImportCore(NotesImportResultWindow owner)
+    {
+        var m = owner.Model;
+        if (_optionsPage?.RestoreRunning == true) { UndoInfo(owner, NotesImportUndoText.RestoreBusyText); return; }
+        if (ImportRunning) { UndoInfo(owner, NotesImportUndoText.ImportBusyText); return; }
+        NoteUndoPlan trial;
+        try { trial = _notesStore.PlanUndo(m.Journal); }
+        catch (IOException ex) { UndoInfo(owner, UndoReadErrorText(ex)); return; }
+        if (!trial.HasChange)
+        {
+            m.MarkNothingToUndo();
+            UndoInfo(owner, NotesImportUndoText.NothingText(trial));
+            return;
+        }
+        var answer = System.Windows.MessageBox.Show(owner, NotesImportUndoText.ConfirmText(trial), NotesImportUndoText.DialogTitle,
+            MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) { return; }
+        // ⑦：確認框只鎖結果視窗——開著期間可能已開始新一批或還原備份，先重查
+        if (!ReferenceEquals(_lastImport, m) || !m.CanUndo || ImportRunning || _optionsPage?.RestoreRunning == true)
+        {
+            UndoInfo(owner, NotesImportUndoText.RecheckFailedText);
+            return;
+        }
+        NoteUndoPlan plan;
+        try { plan = _notesStore.UndoImportAndSave(m.Journal); }
+        catch (NotesSaveFailedException ex) { UndoInfo(owner, NotesImportUndoText.SaveFailedText(ex.Reason)); return; }
+        catch (IOException ex) { UndoInfo(owner, UndoReadErrorText(ex)); return; }
+        if (!plan.HasChange)
+        {
+            m.MarkNothingToUndo();
+            UndoInfo(owner, NotesImportUndoText.NothingText(plan));
+            return;
+        }
+        _notesPage?.SyncAfterUndoWrite(); // ⑥：同一呼叫內同步筆記頁——其後筆記頁之整份存檔不會把撤銷蓋回
+        _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
+        m.MarkUndone(plan);
+        ToastNotifier.Show(NotesImportUndoText.Toast(plan));
+    }
+
+    private static string UndoReadErrorText(IOException ex) => ex is NotesFileCorruptException ? ex.Message : NotesImportUndoText.ReadLockedText;
+
+    private static void UndoInfo(Window owner, string text)
+        => System.Windows.MessageBox.Show(owner, text, NotesImportUndoText.DialogTitle, MessageBoxButton.OK, MessageBoxImage.Information);
 
     private static void ToastImportOutcome(NotesImportOutcome outcome, string folderName, bool ownOnly)
     {
@@ -648,11 +751,13 @@ public partial class App : System.Windows.Application
     private void RunOwnOnlyNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> items, IReadOnlyList<ImportFailureSource> sources)
     {
         var runner = new NotesImportRunner(_notesStore, NotesImportRunner.NoLookup);
+        BeginNewImportForUndo(); // #324 ③：執行器即將開始——上一批之撤銷失效
         var outcome = runner.RunOwnOnly(items, folderId, NoteDefaults.ColorHex);
         RecordImportFailures(sources, outcome); // #323
+        SetLastImport(outcome, folderName);     // #324
         _notesPage?.Reload();
         _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
-        _pendingImportResult = (outcome.Ending, NotesImport.ResultBody(outcome, folderName));
+        _pendingImportResult = _lastImport;
         ToastImportOutcome(outcome, folderName, ownOnly: true);
         ShowPendingImportResult();
     }
@@ -668,12 +773,22 @@ public partial class App : System.Windows.Application
         }
         try
         {
+            // #324 ⑥：送出付費查詢之前先確認條目仍在（可能已被整批撤銷或刪除）——不在即告知、不查詢
+            if (!NotesStore.AllFolders(_notesStore.LoadStrict()).Any(f => f.Entries.Any(e => e.Id == id)))
+            {
+                ToastNotifier.Show(NotesImportUndoText.EntryGoneEditToast);
+                return;
+            }
             var query = new QueryService(_config.Model, _config.TimeoutSec, _config.MaxRetries);
             var result = await query.QueryTextAsync(t);
             var data = _notesStore.LoadStrict(); // #322：讀失敗擲出、不以空結構寫回
             if (NotesStore.UpdateEntryContent(data, id, result))
             {
                 _notesStore.Save(data);
+            }
+            else
+            {
+                ToastNotifier.Show(NotesImportUndoText.EntryGoneEditToast); // #324 ⑥：查詢途中才被撤——不靜默
             }
         }
         catch (Exception ex) when (ex is QueryException or IOException)
