@@ -250,7 +250,7 @@ public class NotesImportMultiTests
         var tooMany = NotesImport.ScanSources(new[] { Src("a.txt", Enumerable.Repeat("apple", NotesImport.MaxLines + 1).ToArray()) }, _ => null);
         Assert.Equal($"這份清單超過 {NotesImport.MaxLines} 行（含重複），不像單字清單——請確認是否選錯檔、或拆成幾份再匯入。", tooMany.Error);
         var empty = NotesImport.ScanSources(new[] { Src("a.txt", "  ", "") }, _ => null);
-        Assert.Equal("檔案裡沒有任何可匯入的字——每行一個英文單字或片語（csv 只取第一欄），空行會被忽略。", empty.Error);
+        Assert.Equal("檔案裡沒有任何可匯入的字——每行一個英文單字或片語（csv 第一欄英文、第二欄可放自備中譯），空行會被忽略。", empty.Error);
         var dup = NotesImport.ScanSources(new[] { Src("a.txt", "apple", "Apple") }, _ => null);
         Assert.Equal("檔內重複（只留第一筆）", NotesImport.StatusText(dup.Entries[1]));
         Assert.Equal("共 2 列：新字 1、已在筆記 0、檔內重複 1", NotesImport.SummaryText(dup.Entries));

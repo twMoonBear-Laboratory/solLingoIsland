@@ -18,9 +18,15 @@ public enum NotesImportStatus
 /// <summary>
 /// 彙總確認表之一列：原文、狀態、預設勾選。<paramref name="Source"/>＝來源檔顯示名（#320 來源欄）；
 /// <paramref name="FirstSource"/>＝重複列之首見來源（同檔時與 Source 相同）。
+/// <paramref name="OwnTranslation"/>（#321）＝非重複列：採用之自備中譯（csv 第二欄，同字多筆時取合併序第一個非空者）；重複列：該列自己的第二欄。
+/// <paramref name="TranslationFromDuplicate"/>＝非重複列之自備中譯係自後見之重複列遞補；<paramref name="TranslationRejected"/>＝重複列之第二欄非空且與採用者不同。
 /// </summary>
-public sealed record NotesImportEntry(string Text, NotesImportStatus Status, string ExistingFolder = "", string Source = "", string FirstSource = "")
+public sealed record NotesImportEntry(string Text, NotesImportStatus Status, string ExistingFolder = "", string Source = "", string FirstSource = "",
+    string OwnTranslation = "", bool TranslationFromDuplicate = false, bool TranslationRejected = false)
 {
+    /// <summary>非重複列且帶自備中譯（#321）。</summary>
+    public bool HasOwnTranslation => Status != NotesImportStatus.DuplicateInFile && OwnTranslation.Length > 0;
+
     /// <summary>預設勾選＝新字。</summary>
     public bool DefaultSelected => Status == NotesImportStatus.New;
 
@@ -40,8 +46,17 @@ public enum NotesImportExcludeKind { NotListFile, Folder, Unreadable, Misdecoded
 /// <summary>未納入確認表之一檔（#320）：顯示名、原因類別、原因文字。</summary>
 public sealed record NotesImportExcluded(string FileName, NotesImportExcludeKind Kind, string Reason);
 
-/// <summary>可用來源之一檔（#320）：完整路徑、顯示名（同名檔附上層夾）、解析後之候選原文。</summary>
-public sealed record NotesImportSource(string Path, string DisplayName, IReadOnlyList<string> Lines);
+/// <summary>可用來源之一檔（#320）：完整路徑、顯示名（同名檔附上層夾）、解析後之候選原文；<paramref name="Translations"/>（#321）＝與 Lines 逐列對齊之自備中譯（空字串＝無；null＝全無）。</summary>
+public sealed record NotesImportSource(string Path, string DisplayName, IReadOnlyList<string> Lines, IReadOnlyList<string>? Translations = null);
+
+/// <summary>解析後之一列（#321）：原文與自備中譯（csv 第二欄；空字串＝無）。</summary>
+public sealed record NotesImportLine(string Text, string Translation);
+
+/// <summary>確認後交出之一字（#321）：原文與自備中譯（空＝線上查詢）。</summary>
+public sealed record NotesImportItem(string Text, string OwnTranslation = "")
+{
+    public bool IsOwn => OwnTranslation.Length > 0;
+}
 
 /// <summary>多檔載入結果（#320）：可用來源（依檔名自然排序）、讀後不可用之檔，或整批拒收之原因（合計逾 2 MB）。</summary>
 public sealed record NotesImportLoad(IReadOnlyList<NotesImportSource> Sources, IReadOnlyList<NotesImportExcluded> Excluded, string? Error)
@@ -50,7 +65,7 @@ public sealed record NotesImportLoad(IReadOnlyList<NotesImportSource> Sources, I
 }
 
 /// <summary>
-/// 【匯入清單】之純函式輔助（[modPresent模組] 筆記清單匯入契約，spec#14／#309）：解析 txt／csv 第一欄、
+/// 【匯入清單】之純函式輔助（[modPresent模組] 筆記清單匯入契約，spec#14／#309）：解析 txt／csv（csv 第一欄原文、第二欄自備中譯，#321）、
 /// 去空白空行、檔內去重、對照既有筆記標狀態、各段文案。<b>純函式、不碰 UI 與網路</b>——比照 <see cref="AcquireBatch"/>
 /// 把批次流程之判斷集中於此以便單元測試；讀檔由 <see cref="ReadAllText"/> 薄接線負責、查詢與寫入由 <see cref="NotesImportRunner"/> 負責。
 /// </summary>
@@ -77,7 +92,7 @@ public static class NotesImport
     /// <summary>讀出之內容含 U+FFFD（UTF-8 解碼失敗之替代字元）即判疑似編碼不符（例如舊式 ANSI／Big5 txt）——不照查照付。</summary>
     public static bool LooksMisdecoded(string? content) => !string.IsNullOrEmpty(content) && content.IndexOf('�') >= 0;
 
-    /// <summary>副檔名是否以 CSV 規則解析（取第一欄）；其餘一律當每行一字之純文字。</summary>
+    /// <summary>副檔名是否以 CSV 規則解析（第一欄原文、第二欄自備中譯）；其餘一律當每行一字之純文字。</summary>
     public static bool IsCsv(string path)
         => string.Equals(Path.GetExtension(path), ".csv", StringComparison.OrdinalIgnoreCase);
 
@@ -85,36 +100,135 @@ public static class NotesImport
     public static string ReadAllText(string path) => File.ReadAllText(path, new UTF8Encoding(false));
 
     /// <summary>
-    /// 自檔案內容抽出候選原文（純函式）：逐行（`\r\n`／`\n`／`\r` 皆可）、剝 BOM、
-    /// <paramref name="csv"/>＝true 時取第一欄（支援雙引號欄位、欄內逗號與 `""` 轉義；分隔符只認逗號）；
-    /// txt 行若含 **tab** 只取 tab 前（Anki 匯出之 `apple⇥蘋果` 常規）、並剝除行首 **編號**（`1.`／`1)`／`(1)`／`1、`）；
-    /// 去前後空白、去空行。<b>不去重</b>——重複之判定與標記歸 <see cref="Scan"/>，使確認頁能把「檔內重複」顯示出來。
+    /// 自檔案內容抽出候選原文（純函式）：<see cref="ParseEntries"/> 之原文投影（行為同 v4.16.0；csv 之引號欄跨行續接見 <see cref="ParseEntries"/>）。
+    /// <b>不去重</b>——重複之判定與標記歸 <see cref="Scan"/>，使確認頁能把「檔內重複」顯示出來。
     /// </summary>
-    public static List<string> ParseLines(string? content, bool csv)
+    public static List<string> ParseLines(string? content, bool csv) => ParseEntries(content, csv).Select(e => e.Text).ToList();
+
+    /// <summary>引號欄跨行續接之上限（實體行數，#321）。</summary>
+    public const int MaxContinuationLines = 20;
+
+    /// <summary>
+    /// 自檔案內容抽出「原文＋自備中譯」列（純函式，#321）：逐行（`\r\n`／`\n`／`\r` 皆可）、剝 BOM；
+    /// <b>csv</b>：第一欄為原文（規則同 <see cref="FirstCsvField"/>：欄首雙引號、`""` 轉義、分隔符只認逗號），第二欄為自備中譯（起點＝第一欄後之第一個逗號之後；
+    /// 容許開頭引號前之空白；第三欄起忽略）；某欄以開頭引號起始而本行未閉合者，向下續接至合規閉合（閉合引號其後緊接逗號或行尾；
+    /// 上限 <see cref="MaxContinuationLines"/> 行；遇不合規之引號、逾限或檔尾即放棄、該行逐行解析），欄內各段去空白、略空段後以「；」（第二欄）或空白（第一欄）相連；
+    /// 首列第一欄為常見表頭字即略過整列。<b>txt</b>：`#` 起首之註解行略過、tab 前為原文、剝行首編號，恆無自備中譯。去前後空白、去空行。
+    /// </summary>
+    public static List<NotesImportLine> ParseEntries(string? content, bool csv)
     {
-        var result = new List<string>();
+        var result = new List<NotesImportLine>();
         if (string.IsNullOrEmpty(content)) { return result; }
-        var text = content.TrimStart('﻿');
+        var text = content.TrimStart('\uFEFF');
+        var lines = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
         var firstRow = true;
-        foreach (var raw in text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None))
+        for (var i = 0; i < lines.Length; i++)
         {
-            var line = raw;
-            if (csv) { line = FirstCsvField(raw); }
+            string first, second = "";
+            if (csv)
+            {
+                (first, second, var consumed) = ReadCsvRecord(lines, i);
+                i += consumed - 1;
+            }
             else
             {
+                var line = lines[i];
                 if (line.TrimStart().StartsWith("#")) { continue; }   // Anki 匯出檔頭 `#separator:tab`／`#html:true` 等註解行
                 var tab = line.IndexOf('\t');
-                if (tab >= 0) { line = line[..tab]; }          // Anki／試算表 TSV：只取第一欄
-                line = StripLeadingNumber(line);
+                if (tab >= 0) { line = line[..tab]; }          // Anki／試算表 TSV：只取第一欄（txt 不採第二欄，#321）
+                first = StripLeadingNumber(line);
             }
-            var t = line.Trim();
+            var t = first.Trim();
             if (t.Length == 0) { continue; }
             if (csv && firstRow && CsvHeaderWords.Contains(t, StringComparer.OrdinalIgnoreCase)) { firstRow = false; continue; } // 表頭列略過
             firstRow = false;
-            result.Add(t);
+            result.Add(new NotesImportLine(t, second.Trim()));
         }
         return result;
     }
+
+    /// <summary>
+    /// 讀一筆 csv 記錄（#321）：先試本行；某引號欄未閉合時向下續接（至多 <see cref="MaxContinuationLines"/> 行）至合規閉合；
+    /// 續接失敗（不合規引號、逾限、檔尾）即退回本行逐行解析。回傳第一欄、第二欄與所耗實體行數。
+    /// </summary>
+    private static (string First, string Second, int Consumed) ReadCsvRecord(string[] lines, int start)
+    {
+        var single = ParseCsvFields(lines[start], strict: false);
+        if (!single.Unclosed) { return (single.First, single.Second, 1); }
+        var sb = new StringBuilder(lines[start]);
+        for (var k = 1; k <= MaxContinuationLines && start + k < lines.Length; k++)
+        {
+            sb.Append('\n').Append(lines[start + k]);
+            var r = ParseCsvFields(sb.ToString(), strict: true);
+            if (r.Invalid) { break; }
+            if (!r.Unclosed) { return (Squash(r.First, " "), Squash(r.Second, "；"), k + 1); }
+        }
+        return (single.First, single.Second, 1); // 退回逐行（v4.18.0 行為）
+    }
+
+    /// <summary>欄內換行：各段去空白、略空段後以 <paramref name="sep"/> 相連（#321）。</summary>
+    private static string Squash(string field, string sep)
+        => field.IndexOf('\n') < 0 ? field : string.Join(sep, field.Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0));
+
+    /// <summary>
+    /// 解析一段 csv 文字（可含續接之換行）之前兩欄（#321）。第一欄：欄首為 `"` 才是引號欄（閉合後至逗號間之字元忽略），否則取至首個逗號；
+    /// 第二欄：略過前置空白後為 `"` 才是引號欄，否則取至下一個逗號。<paramref name="strict"/>（續接時）：引號欄之閉合引號其後須為逗號或結尾，否則 Invalid。
+    /// Unclosed＝某引號欄至結尾未閉合（非嚴格時其內容取至結尾，同 <see cref="FirstCsvField"/>）。
+    /// </summary>
+    private static (string First, string Second, bool Unclosed, bool Invalid) ParseCsvFields(string t, bool strict)
+    {
+        var pos = 0;
+        var unclosed = false;
+        var invalid = false;
+        string ReadField(bool allowLeadingSpace)
+        {
+            var q = pos;
+            if (allowLeadingSpace) { while (q < t.Length && t[q] == ' ') { q++; } }
+            if (q < t.Length && t[q] == '"')
+            {
+                var sb = new StringBuilder();
+                var i = q + 1;
+                for (; i < t.Length; i++)
+                {
+                    var c = t[i];
+                    if (c == '"')
+                    {
+                        if (i + 1 < t.Length && t[i + 1] == '"') { sb.Append('"'); i++; continue; }
+                        break;
+                    }
+                    sb.Append(c);
+                }
+                if (i >= t.Length) { unclosed = true; pos = t.Length; return sb.ToString(); }
+                var after = i + 1;
+                if (strict && i > t.IndexOf('\n') && after < t.Length && t[after] != ',') { invalid = true; } // 只驗續接段內之閉合
+                var comma = t.IndexOf(',', after);
+                pos = comma < 0 ? t.Length : comma; // 停在逗號（或結尾）
+                return sb.ToString();
+            }
+            var end = t.IndexOf(',', pos);
+            var raw = end < 0 ? t[pos..] : t[pos..end];
+            pos = end < 0 ? t.Length : end;
+            return raw;
+        }
+        if (t.Length == 0) { return ("", "", false, false); }
+        var first = ReadField(allowLeadingSpace: false);
+        var second = "";
+        if (!unclosed && pos < t.Length && t[pos] == ',')
+        {
+            pos++;
+            second = ReadField(allowLeadingSpace: true);
+            // 第三欄起不取值，但其引號欄同樣須判閉合（Excel 備註欄之儲存格內換行亦不得把殘段切成新字）
+            while (!unclosed && pos < t.Length && t[pos] == ',')
+            {
+                pos++;
+                ReadField(allowLeadingSpace: true);
+            }
+        }
+        return (first, second, unclosed, invalid);
+    }
+
+    /// <summary>取 csv 一列之第二欄（純函式，#321；規則見 <see cref="ParseEntries"/>，不續接）。</summary>
+    public static string SecondCsvField(string line) => ParseCsvFields(line ?? "", strict: false).Second.Trim();
 
     /// <summary>剝除行首編號（純函式）：`1. apple`／`12) apple`／`(3) apple`／`4、apple` → `apple`；純數字行不剝（那是整行內容）。</summary>
     public static string StripLeadingNumber(string line)
@@ -125,7 +239,10 @@ public static class NotesImport
     }
 
     /// <summary>取 CSV 一列之第一欄（純函式）：`"a, b",c` → `a, b`；`""` 轉義為 `"`；無引號者取至首個逗號。</summary>
-    public static string FirstCsvField(string line)
+    public static string FirstCsvField(string line) => ParseCsvFields(line ?? "", strict: false).First; // #321：與 ParseEntries 同一解析器、規則不分岔
+
+    /// <summary>v4.18.0 之第一欄取法（僅供測試比對新解析器之第一欄與舊行為等價；產品碼不呼叫）。</summary>
+    internal static string LegacyFirstCsvField(string line)
     {
         if (string.IsNullOrEmpty(line)) { return ""; }
         if (line[0] != '"')
@@ -148,7 +265,7 @@ public static class NotesImport
     }
 
     /// <summary>
-    /// 預掃描（純函式）：對 <see cref="ParseLines"/> 之結果逐字標狀態——檔內同鍵（<see cref="NoteEntry.KeyOf"/>）只留首見、其餘
+    /// 預掃描（純函式；單一來源之 <see cref="ScanSources"/> 特例）：對 <see cref="ParseLines"/> 之結果逐字標狀態——檔內同鍵（<see cref="NoteEntry.KeyOf"/>）只留首見、其餘
     /// <see cref="NotesImportStatus.DuplicateInFile"/>；首見者再以 <paramref name="existsInNotes"/>（鍵→是否已在筆記）標
     /// <see cref="NotesImportStatus.AlreadyInNotes"/> 或 <see cref="NotesImportStatus.New"/>。空清單或逾 <see cref="MaxWords"/>（以去重後之不重複字數計）
     /// 回 <see cref="NotesImportScan.Error"/>，整檔拒收。
@@ -170,31 +287,42 @@ public static class NotesImport
         var multi = sources.Count >= 2;
         var firstSourceOf = new Dictionary<string, string>(StringComparer.Ordinal);
         var entries = new List<NotesImportEntry>();
-        var lineCount = 0;
+        // 第一趟：依合併序攤平（上限以合併後計），並求每鍵採用之自備中譯＝合併序第一個非空之第二欄（#321：首見空白則遞補）
+        var flat = new List<(string Text, string Translation, string Source)>();
+        var adopted = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var src in sources)
         {
-            foreach (var raw in src.Lines)
+            for (var j = 0; j < src.Lines.Count; j++)
             {
-                var text = (raw ?? "").Trim();
+                var text = (src.Lines[j] ?? "").Trim();
                 if (text.Length == 0) { continue; }
-                if (++lineCount > MaxLines)
+                if (flat.Count + 1 > MaxLines)
                 {
                     return new NotesImportScan(entries, multi
                         ? $"這 {sources.Count} 個檔合計超過 {MaxLines} 行（含重複），不像單字清單——請確認是否選錯檔、或分幾批匯入。"
                         : $"這份清單超過 {MaxLines} 行（含重複），不像單字清單——請確認是否選錯檔、或拆成幾份再匯入。");
                 }
-                var key = NoteEntry.KeyOf(text);
-                if (firstSourceOf.TryGetValue(key, out var first))
-                {
-                    entries.Add(new NotesImportEntry(text, NotesImportStatus.DuplicateInFile, "", src.DisplayName, first));
-                    continue;
-                }
-                firstSourceOf[key] = src.DisplayName;
-                var folder = folderOfExisting(key);
-                entries.Add(folder is null
-                    ? new NotesImportEntry(text, NotesImportStatus.New, "", src.DisplayName)
-                    : new NotesImportEntry(text, NotesImportStatus.AlreadyInNotes, folder, src.DisplayName));
+                var tr = (src.Translations is { } ts && j < ts.Count ? ts[j] ?? "" : "").Trim();
+                flat.Add((text, tr, src.DisplayName));
+                var k = NoteEntry.KeyOf(text);
+                if (tr.Length > 0 && !adopted.ContainsKey(k)) { adopted[k] = tr; }
             }
+        }
+        // 第二趟：同鍵只留首見（#320）；自備中譯依上趟採用者標記
+        foreach (var (text, tr, source) in flat)
+        {
+            var key = NoteEntry.KeyOf(text);
+            var use = adopted.TryGetValue(key, out var a) ? a : "";
+            if (firstSourceOf.TryGetValue(key, out var first))
+            {
+                entries.Add(new NotesImportEntry(text, NotesImportStatus.DuplicateInFile, "", source, first,
+                    OwnTranslation: tr, TranslationRejected: tr.Length > 0 && !string.Equals(tr, use, StringComparison.Ordinal)));
+                continue;
+            }
+            firstSourceOf[key] = source;
+            var folder = folderOfExisting(key);
+            entries.Add(new NotesImportEntry(text, folder is null ? NotesImportStatus.New : NotesImportStatus.AlreadyInNotes, folder ?? "", source,
+                OwnTranslation: use, TranslationFromDuplicate: use.Length > 0 && tr.Length == 0));
         }
         if (entries.Count == 0) { return new NotesImportScan(entries, EmptyFileMessage); }
         var unique = firstSourceOf.Count;
@@ -208,7 +336,7 @@ public static class NotesImport
     }
 
     /// <summary>單檔沒有任何可匯入之字（v4.16.0 文案）。</summary>
-    public const string EmptyFileMessage = "檔案裡沒有任何可匯入的字——每行一個英文單字或片語（csv 只取第一欄），空行會被忽略。";
+    public const string EmptyFileMessage = "檔案裡沒有任何可匯入的字——每行一個英文單字或片語（csv 第一欄英文、第二欄可放自備中譯），空行會被忽略。";
 
     /// <summary>單檔疑似非 UTF-8（v4.16.0 文案）。</summary>
     public const string MisdecodedFileMessage = "這個檔案疑似不是 UTF-8 編碼（讀出了亂碼字元）。請在記事本「另存新檔」時把編碼改為 UTF-8，再匯入一次——不會拿亂碼去查詢。";
@@ -284,9 +412,10 @@ public static class NotesImport
             try { content = read(p); }
             catch (Exception ex) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Unreadable, "讀不到：" + ReasonOf(ex))); continue; }
             if (LooksMisdecoded(content)) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Misdecoded, "疑似不是 UTF-8 編碼")); continue; }
-            var lines = ParseLines(content, IsCsv(p));
-            if (lines.Count == 0) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Empty, "沒有可匯入的字")); continue; }
-            sources.Add(new NotesImportSource(p, Display(p), lines));
+            var parsed = ParseEntries(content, IsCsv(p));
+            if (parsed.Count == 0) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Empty, "沒有可匯入的字")); continue; }
+            sources.Add(new NotesImportSource(p, Display(p), parsed.Select(x => x.Text).ToList(),
+                parsed.Any(x => x.Translation.Length > 0) ? parsed.Select(x => x.Translation).ToList() : null)); // #321 自備中譯（全無則 null）
         }
         return new NotesImportLoad(sources, excluded, null);
     }
@@ -308,7 +437,7 @@ public static class NotesImport
             };
         }
         const int show = 10; // 數百檔時不讓對話框超出螢幕
-        return "沒有可以匯入的檔——只接受 .txt（每行一字）與 .csv（取第一欄）：\n"
+        return "沒有可以匯入的檔——只接受 .txt（每行一字）與 .csv（第一欄英文、第二欄可放自備中譯）：\n"
                + string.Join("\n", excluded.Take(show).Select(x => $"· {x.FileName}（{x.Reason}）"))
                + (excluded.Count > show ? $"\n…等 {excluded.Count} 個" : "");
     }
@@ -366,7 +495,25 @@ public static class NotesImport
     }
 
     /// <summary>單列狀態文案（純函式）——與設計 [modHmi筆記匯入確認頁] 狀態欄一一對應，文字即原因。</summary>
-    public static string StatusText(NotesImportEntry e) => e.Status switch
+    public static string StatusText(NotesImportEntry e) => StatusText(e, forceOnline: false);
+
+    /// <summary>
+    /// 單列狀態文案（#321）：帶自備中譯之已在筆記列（未切仍查線上）＝「勾選＝以自備中譯更新；已在筆記「夾」」（關鍵句置前）；
+    /// 重複列之第二欄與採用者不同（未切仍查線上）追加「；中譯「X」未採用」。其餘同 v4.18.0。
+    /// </summary>
+    public static string StatusText(NotesImportEntry e, bool forceOnline)
+    {
+        if (!forceOnline && e.Status == NotesImportStatus.AlreadyInNotes && e.HasOwnTranslation)
+        {
+            return e.ExistingFolder.Length > 0 ? $"勾選＝以自備中譯更新；已在筆記「{e.ExistingFolder}」" : "勾選＝以自備中譯更新；已在筆記";
+        }
+        var baseText = BaseStatusText(e);
+        return !forceOnline && e.Status == NotesImportStatus.DuplicateInFile && e.TranslationRejected
+            ? $"{baseText}；中譯「{e.OwnTranslation}」未採用"
+            : baseText;
+    }
+
+    private static string BaseStatusText(NotesImportEntry e) => e.Status switch
     {
         NotesImportStatus.New => "新字",
         NotesImportStatus.AlreadyInNotes => e.ExistingFolder.Length > 0
@@ -379,27 +526,55 @@ public static class NotesImport
     };
 
     /// <summary>表上方之計數摘要（純函式）：`共 5 列：新字 3、已在筆記 1、檔內重複 1`；多檔（可用來源 ≥2）末項為「重複」（含跨檔，#320）。</summary>
-    public static string SummaryText(IReadOnlyList<NotesImportEntry> entries, bool multiSource = false)
+    public static string SummaryText(IReadOnlyList<NotesImportEntry> entries, bool multiSource = false, bool forceOnline = false)
     {
         var n = entries.Count(e => e.Status == NotesImportStatus.New);
         var a = entries.Count(e => e.Status == NotesImportStatus.AlreadyInNotes);
         var d = entries.Count(e => e.Status == NotesImportStatus.DuplicateInFile);
-        return $"共 {entries.Count} 列：新字 {n}、已在筆記 {a}、{(multiSource ? "重複" : "檔內重複")} {d}";
+        var own = entries.Count(e => e.HasOwnTranslation); // #321：含未勾選者（與費用揭露之「另 x 字」不同口徑）
+        return $"共 {entries.Count} 列：新字 {n}、已在筆記 {a}、{(multiSource ? "重複" : "檔內重複")} {d}"
+               + (own > 0 ? $"、有自備中譯 {own}" + (forceOnline ? "（已改查線上）" : "") : "");
     }
 
     /// <summary>主鈕文案（純函式）：N＝勾選數、隨勾選即時更新；0 由呼叫端停用主鈕。</summary>
-    public static string ConfirmButtonText(int selected) => $"查詢並加入 {selected} 字";
+    public static string ConfirmButtonText(int selected) => ConfirmButtonText(selected, selected);
+
+    /// <summary>主鈕文案（#321）：<paramref name="online"/>＝勾選且將線上查詢之數；全線上同 v4.18.0、全自備「加入 N 字（不查詢）」、混合「加入 N 字（查詢 K 字）」。</summary>
+    public static string ConfirmButtonText(int selected, int online)
+        => online >= selected ? $"查詢並加入 {selected} 字"
+         : online <= 0 ? $"加入 {selected} 字（不查詢）"
+         : $"加入 {selected} 字（查詢 {online} 字）";
 
     /// <summary>費用揭露一行（純函式）：按下前即知會花幾次 AI 查詢；0 時改為提示。</summary>
-    public static string CostText(int selected) => selected <= 0
+    public static string CostText(int selected) => CostText(selected, selected);
+
+    /// <summary>費用揭露（#321）：只計勾選且將線上查詢者；自備中譯之字另述、全自備明示不花費用。</summary>
+    public static string CostText(int selected, int online) => selected <= 0
         ? "尚未勾選任何字——勾選後才會查詢；已在筆記之字不會重複建立。"
-        : $"共 {selected} 次 AI 查詢，將使用你的 OpenAI 金鑰；已在筆記之字不會重複建立。";
+        : online >= selected ? $"共 {selected} 次 AI 查詢，將使用你的 OpenAI 金鑰；已在筆記之字不會重複建立。"
+        : online <= 0 ? $"這 {selected} 字都採用自備中譯——不會呼叫 AI、不花費用；已在筆記之字不會重複建立。"
+        : $"共 {online} 次 AI 查詢，將使用你的 OpenAI 金鑰；另 {selected - online} 字採用自備中譯、不查詢；已在筆記之字不會重複建立。";
+
+    /// <summary>是否有任一非重複列帶自備中譯（#321：確認頁據以顯示中譯來源欄與整批切換）。</summary>
+    public static bool AnyOwnTranslation(IReadOnlyList<NotesImportEntry> entries) => entries.Any(e => e.HasOwnTranslation);
+
+    /// <summary>中譯來源欄文案（#321，純函式）：重複列空白；帶自備中譯（未切仍查線上）＝「自備中譯：X」（遞補者附「（取自重複列）」）；其餘「線上查詢」。</summary>
+    public static string TranslationSourceText(NotesImportEntry e, bool forceOnline)
+        => e.Status == NotesImportStatus.DuplicateInFile ? ""
+         : !forceOnline && e.HasOwnTranslation ? $"自備中譯：{e.OwnTranslation}" + (e.TranslationFromDuplicate ? "（取自重複列）" : "")
+         : "線上查詢";
+
+    /// <summary>勾選之列→交出清單（#321，純函式）：依表列順序；切仍查線上時自備中譯一律清空（全部線上查詢）。</summary>
+    public static List<NotesImportItem> ToItems(IReadOnlyList<NotesImportEntry> entries, Func<int, bool> isSelected, bool forceOnline)
+        => entries.Select((e, i) => (e, i)).Where(x => isSelected(x.i))
+                  .Select(x => new NotesImportItem(x.e.Text, forceOnline || x.e.Status == NotesImportStatus.DuplicateInFile ? "" : x.e.OwnTranslation))
+                  .ToList();
 
     /// <summary>
     /// 批次完成後之結果表（純函式）：已加入／更新／略過／失敗計數＋逐字失敗原因。更新＝勾選之「已在筆記」字已重新查詢並刷新原筆；
     /// 略過＝加入當下已在筆記、而原筆已不存在可更新（他處同時刪除）之邊角。
     /// </summary>
-    public static string ResultText(int added, int updated, IReadOnlyList<string> skipped, IReadOnlyList<(string Word, string Reason)> failed, string folderName, IReadOnlyList<string>? addedWords = null)
+    public static string ResultText(int added, int updated, IReadOnlyList<string> skipped, IReadOnlyList<(string Word, string Reason)> failed, string folderName, IReadOnlyList<string>? addedWords = null, int ownTranslationUsed = 0)
     {
         var sb = new StringBuilder();
         sb.Append($"匯入完成：已加入 {added} 字到「{folderName}」");
@@ -412,6 +587,7 @@ public static class NotesImport
         if (skipped.Count > 0) { sb.Append($"、略過 {skipped.Count} 字"); }
         if (failed.Count > 0) { sb.Append($"、失敗 {failed.Count} 字"); }
         sb.Append('。');
+        if (ownTranslationUsed > 0) { sb.Append($"其中 {ownTranslationUsed} 字採用自備中譯、未查詢。"); } // #321
         if (skipped.Count > 0)
         {
             sb.Append("\n\n略過（加入當下已在筆記、原筆已不在）：\n");

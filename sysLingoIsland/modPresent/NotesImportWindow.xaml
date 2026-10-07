@@ -7,7 +7,7 @@
         ResizeMode="CanResizeWithGrip"
         Background="{StaticResource PinkBg}">
   <!-- [modHmi筆記匯入確認頁]（spec#14，#309）：預掃描彙總確認表——逐列核取（新字預設勾、已在筆記預設不勾、檔內重複不可勾）、
-       全選新字／全不選、來源欄與未納入行（#320）、費用揭露、主鈕「查詢並加入 N 字」（N＝勾選數、0 停用）、取消（Esc 同）。確認前零 AI 呼叫。 -->
+       全選新字／全不選、來源欄與未納入行（#320）、有自備中譯時之中譯來源欄與整批「也改查線上」（#321）、費用揭露、主鈕「查詢並加入 N 字」（N＝勾選數、0 停用；#321 含自備中譯時為「加入 N 字（查詢 K 字）」／「加入 N 字（不查詢）」）、取消（Esc 同）。確認前零 AI 呼叫。 -->
   <Border Style="{StaticResource Card}" Margin="12" Padding="12">
     <Grid>
       <Grid.RowDefinitions>
@@ -33,8 +33,13 @@
         <Button x:Name="SelectNoneBtn" DockPanel.Dock="Left" Content="全不選" Style="{StaticResource GhostButton}"
                 AutomationProperties.AutomationId="NotesImportSelectNone" Padding="10,3"
                 ToolTip="取消所有勾選（之後可逐列再勾）"/>
+        <!-- #321：有自備中譯（csv 第二欄）時才顯示——整批改為線上查詢 -->
+        <CheckBox x:Name="ForceOnlineBox" DockPanel.Dock="Left" Content="有自備中譯的字也改查線上" FontSize="11.5"
+                  Margin="12,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" Foreground="{StaticResource PinkText}"
+                  AutomationProperties.AutomationId="NotesImportForceOnline"
+                  ToolTip="勾選＝不採用 csv 第二欄的自備中譯、全部上網查（取得 AI 的音標與翻譯，會花費用）；取消勾選即恢復"/>
         <TextBlock x:Name="SummaryText" FontSize="11.5" Foreground="{StaticResource PinkSub}"
-                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                   HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="8,0,0,0"/>
       </DockPanel>
 
       <Border Grid.Row="2" BorderBrush="{StaticResource PinkAccent}" BorderThickness="1" CornerRadius="6" Background="#99FFFFFF">
@@ -48,12 +53,14 @@
               <ColumnDefinition Width="34"/>
               <ColumnDefinition Width="200"/>
               <ColumnDefinition Width="130"/>
+              <ColumnDefinition x:Name="TranslationHeaderColumn" Width="0"/>
               <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="勾" FontSize="11" Margin="8,4" Foreground="{StaticResource PinkText}"/>
             <TextBlock Grid.Column="1" Text="單字／片語" FontSize="11" Margin="4,4" Foreground="{StaticResource PinkText}"/>
             <TextBlock Grid.Column="2" Text="來源" FontSize="11" Margin="4,4" Foreground="{StaticResource PinkText}"/>
-            <TextBlock Grid.Column="3" Text="狀態" FontSize="11" Margin="8,4,12,4" Foreground="{StaticResource PinkText}"/>
+            <TextBlock Grid.Column="3" x:Name="TranslationHeader" Text="中譯來源" FontSize="11" Margin="4,4" Foreground="{StaticResource PinkText}" Visibility="Collapsed"/>
+            <TextBlock Grid.Column="4" Text="狀態" FontSize="11" Margin="8,4,12,4" Foreground="{StaticResource PinkText}"/>
           </Grid>
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel x:Name="RowsPanel" Margin="0,2"/>

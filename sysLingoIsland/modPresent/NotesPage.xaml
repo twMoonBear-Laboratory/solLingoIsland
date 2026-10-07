@@ -53,7 +53,7 @@
         <Button x:Name="ImportListBtn" Content="匯入清單" Style="{StaticResource GhostButton}"
                 AutomationProperties.AutomationId="NotesImportBtn"
                 HorizontalAlignment="Left" Padding="10,4"
-                ToolTip="把 .txt（每行一字）或 .csv（取第一欄）的英文清單匯入目前選取的資料夾——先選左側資料夾再按；可多選，也可把檔案直接拖進本頁；匯入前會先列出確認表"/>
+                ToolTip="把 .txt（每行一字）或 .csv（第一欄英文、第二欄可放自備中譯）的英文清單匯入目前選取的資料夾——先選左側資料夾再按；可多選，也可把檔案直接拖進本頁；匯入前會先列出確認表"/>
       </WrapPanel>
       <Border Grid.Row="1" Style="{StaticResource Card}">
         <!-- USR：長資料夾名自動分行——停用水平捲軸使列寬受欄寬約束（配合 MakeItem 列拉伸＋名稱 TextWrapping） -->
