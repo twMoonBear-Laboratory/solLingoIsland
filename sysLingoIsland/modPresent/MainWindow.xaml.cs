@@ -24,6 +24,9 @@ public partial class MainWindow : Window
     /// <summary>使用者按主視窗關閉（✕）：請求結束整個常駐程式（v1.0.1，取代原「關閉＝收合」；由 App 走統一結束流程）。</summary>
     public event Action? ExitRequested;
 
+    /// <summary>匯入進度列「取消」（#322）：按下即取消、不另確認（已加入者保留）。</summary>
+    public event Action? ImportCancelRequested;
+
     /// <summary>已提示過「缺此語言語音」之 culture（#252）——每種語言只擾民一次。</summary>
     private readonly HashSet<string> _missingVoiceNotified = new(StringComparer.OrdinalIgnoreCase);
 
@@ -39,6 +42,7 @@ public partial class MainWindow : Window
     public MainWindow(ThemeManagementPage themes, ScreenCapturePage capture, VideoCapturePage video, EbookPage ebook, NotesPage notes, HistoryPage history, OptionsPage options, AboutPage about, ThemeStore themeStore)
     {
         InitializeComponent();
+        ImportProgressCancel.Click += (_, _) => ImportCancelRequested?.Invoke();
         _themes = themes;
         _capture = capture;
         _video = video;
@@ -240,6 +244,20 @@ public partial class MainWindow : Window
         UpdateSeparator.Visibility = Visibility.Visible;
         UpdateText.Visibility = Visibility.Visible;
     }
+
+    /// <summary>顯示／更新匯入進度列（#322）：文字（過長以省略號截斷、ToolTip 全文）、進度條 0–N、取消中停用「取消」。</summary>
+    public void ShowImportProgress(string text, int done, int total, bool cancelling)
+    {
+        ImportProgressText.Text = text;
+        ImportProgressText.ToolTip = text;
+        ImportProgressBar.Maximum = Math.Max(1, total);
+        ImportProgressBar.Value = Math.Clamp(done, 0, Math.Max(1, total));
+        ImportProgressCancel.IsEnabled = !cancelling;
+        ImportProgressPanel.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>隱藏匯入進度列（#322）：匯入結束即收起、不佔位。</summary>
+    public void HideImportProgress() => ImportProgressPanel.Visibility = Visibility.Collapsed;
 
     /// <summary>從收合狀態還原並帶到前景。</summary>
     public void RestoreFromTray()

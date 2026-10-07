@@ -70,6 +70,7 @@
         <RowDefinition Height="Auto"/>
         <RowDefinition Height="*"/>
         <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
       </Grid.RowDefinitions>
 
       <!-- 功能列分頁（圖示＋文字；標題僅在 OS 標題列、內容區不重複——Issue #38 Windows 慣例） -->
@@ -94,7 +95,27 @@
       <ContentControl x:Name="Host" Grid.Row="1" Margin="0"/>
 
       <!-- 底部狀態列（Windows 慣例：狀態文字置底——Issue #38） -->
-      <StatusBar Grid.Row="2" Background="{StaticResource PinkTint}" BorderBrush="{StaticResource PinkAccent}" BorderThickness="0,1,0,0">
+      <!-- [modHmi匯入進度列]（spec#14，#322）：匯入清單背景執行中於內容區與狀態列之間顯示；未匯入時 Collapsed、不佔位；各分頁皆可見、不搶焦點 -->
+      <Border Grid.Row="2" x:Name="ImportProgressPanel" Visibility="Collapsed" Background="{StaticResource PinkTint}"
+              BorderBrush="{StaticResource PinkAccent}" BorderThickness="0,1,0,0" Padding="10,6,8,6"
+              AutomationProperties.AutomationId="NotesImportProgress">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" x:Name="ImportProgressText" FontSize="12.5" Foreground="#3A2C33" VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="NotesImportProgressText"/>
+          <ProgressBar Grid.Column="1" x:Name="ImportProgressBar" Width="160" Height="10" Margin="12,0,12,0" VerticalAlignment="Center"
+                       Minimum="0" Maximum="1" Value="0" Foreground="#B0578D" Background="#FFFFFF" BorderBrush="#E4B7C6"
+                       AutomationProperties.AutomationId="NotesImportProgressBar"/>
+          <Button Grid.Column="2" x:Name="ImportProgressCancel" Content="取消" Style="{StaticResource GhostButton}" MinWidth="70"
+                  AutomationProperties.AutomationId="NotesImportProgressCancel"/>
+        </Grid>
+      </Border>
+
+      <StatusBar Grid.Row="3" Background="{StaticResource PinkTint}" BorderBrush="{StaticResource PinkAccent}" BorderThickness="0,1,0,0">
         <StatusBarItem>
           <TextBlock x:Name="KeyStatusText" FontSize="12" Foreground="#2E7D46" Margin="6,0,0,0"/>
         </StatusBarItem>

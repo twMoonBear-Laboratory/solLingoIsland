@@ -86,8 +86,20 @@ public partial class OptionsPage : UserControl, IUnsavedGuardPage
     }
 
     /// <summary>匯入資料（#206）：確認 → 驗備份 → 先解壓暫存再搬入（解壓失敗不動本機資料）→ 提示並關閉程式（重啟後套用）；還原走背景執行緒、執行中禁用雙鈕。</summary>
+    /// <summary>匯入清單背景執行中時回提示文案（#322；App 注入）：備份還原與匯入清單雙向互斥。</summary>
+    public Func<string?>? RestoreBlockedReason { get; set; }
+
+    /// <summary>備份還原進行中（#322）：自確認還原至程式結束；還原失敗即解除。供 App 擋匯入清單。</summary>
+    public bool RestoreRunning { get; private set; }
+
     private async void OnImportData()
     {
+        if (RestoreBlockedReason?.Invoke() is { } why)
+        {
+            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this), why, "資料備份與搬遷",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information); // #322：匯入清單進行中不還原
+            return;
+        }
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
             Title = "匯入 LingoIsland 資料",
@@ -98,6 +110,13 @@ public partial class OptionsPage : UserControl, IUnsavedGuardPage
             "匯入會以備份內容覆蓋本機同名資料（筆記／歷史／主題／截圖／影片與設定），其餘檔案保留。\n建議先「匯出資料…」留存現況。\n\n匯入完成後程式會關閉，請再重新開啟。要繼續嗎？",
             "匯入資料", System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Warning);
         if (go != System.Windows.MessageBoxResult.OK) { return; }
+        if (RestoreBlockedReason?.Invoke() is { } why2) // 確認框開著期間可能剛開始匯入清單
+        {
+            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this), why2, "資料備份與搬遷",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            return;
+        }
+        RestoreRunning = true; // #322：還原進行中擋匯入清單（至程式結束；失敗即解除）
         ExportDataBtn.IsEnabled = ImportDataBtn.IsEnabled = false; // 審查修：還原走背景、大 zip 不凍 UI、防重入
         try
         {
@@ -111,6 +130,7 @@ public partial class OptionsPage : UserControl, IUnsavedGuardPage
         {
             System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this),
                 $"匯入失敗：{ex.Message}\n本機資料未被變更（還原於解壓暫存階段即中止）。", "匯入資料", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            RestoreRunning = false;
         }
         finally { ExportDataBtn.IsEnabled = ImportDataBtn.IsEnabled = true; }
     }
