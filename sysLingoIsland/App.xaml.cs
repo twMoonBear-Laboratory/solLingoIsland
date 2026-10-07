@@ -235,9 +235,10 @@ public partial class App : System.Windows.Application
     private bool AskStopImport()
     {
         var text = NotesImport.ExitConfirmText(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0);
-        var r = _main is { IsVisible: true }
-            ? System.Windows.MessageBox.Show(_main, text, NotesImport.ExitConfirmTitle, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No)
-            : System.Windows.MessageBox.Show(text, NotesImport.ExitConfirmTitle, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No);
+        // 主視窗最小化或隱藏時（系統匣「結束」常見）不以它為 owner——owner 最小化之訊息框可能不顯示；改為無 owner 且置於桌面最上層
+        var r = MainShowing()
+            ? System.Windows.MessageBox.Show(_main!, text, NotesImport.ExitConfirmTitle, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No)
+            : System.Windows.MessageBox.Show(text, NotesImport.ExitConfirmTitle, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No, System.Windows.MessageBoxOptions.DefaultDesktopOnly);
         return r == System.Windows.MessageBoxResult.Yes;
     }
 
@@ -245,7 +246,10 @@ public partial class App : System.Windows.Application
     private bool ConfirmRestartDuringImport()
     {
         if (!ImportRunning) { return true; }
-        if (!AskStopImport()) { return false; }
+        if (_exitPrompting) { return false; } // 結束確認同一時間只一個
+        _exitPrompting = true;
+        try { if (!AskStopImport()) { return false; } }
+        finally { _exitPrompting = false; }
         _exitingDuringImport = true;
         _importCts?.Cancel();
         // 守備：重啟若未真的結束程式（無待套用之更新、或更新器擲例外），數秒後解除結束中，補開結果、之後之匯入照常出結果

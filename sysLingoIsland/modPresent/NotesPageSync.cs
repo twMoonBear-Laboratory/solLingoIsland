@@ -48,6 +48,38 @@ public static class NotesPageSync
         return to < 0 ? Math.Clamp(from, 0, idsAfterRemoval.Count) : to;
     }
 
+    /// <summary>
+    /// 條目區背景重繪之閘（#322 ⑥(c)，狀態機、不依賴 WPF）：<see cref="Request"/> 於延後條件成立或本頁不可見時只標記待更新；
+    /// 節流期間（上一次重繪後 2 秒內）合併為一次排隊；<see cref="Tick"/>（節流計時到）補做排隊者；回 true＝呼叫端此刻重繪並啟動節流計時。
+    /// </summary>
+    public sealed class BackgroundRenderGate
+    {
+        private bool _throttling, _queued;
+
+        /// <summary>畫面待更新（延後或節流中）。</summary>
+        public bool Stale { get; private set; }
+
+        public bool Request(bool hold, bool visible)
+        {
+            if (hold || !visible) { Stale = true; return false; }
+            if (_throttling) { _queued = true; Stale = true; return false; }
+            _throttling = true;
+            Stale = false;
+            return true;
+        }
+
+        public bool Tick(bool hold, bool visible)
+        {
+            _throttling = false;
+            if (!_queued) { return false; }
+            _queued = false;
+            return Request(hold, visible);
+        }
+
+        /// <summary>任何原因之整區重繪（切夾、整頁重載）皆使畫面與資料一致。</summary>
+        public void MarkRendered() => Stale = false;
+    }
+
     private static int IndexOf(IReadOnlyList<string> ids, string id)
     {
         for (var i = 0; i < ids.Count; i++) { if (ids[i] == id) { return i; } }

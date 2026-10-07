@@ -406,6 +406,57 @@ public class NotesImportBackgroundTests
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public void RenderGate_DefersWhileHeldOrHidden_ThrottlesAndCoalesces_FlushesAfter()
+    {
+        var g = new NotesPageSync.BackgroundRenderGate();
+        Assert.False(g.Request(hold: true, visible: true));   // 錄音／編輯／拖曳／選單／指標中：延後
+        Assert.True(g.Stale);
+        Assert.False(g.Request(hold: false, visible: false)); // 不可見：延後（切回時整頁重載補上）
+        Assert.True(g.Request(hold: false, visible: true));   // 條件解除：立即重繪並開始節流
+        Assert.False(g.Stale);
+        Assert.False(g.Request(false, true));                  // 節流期間：合併排隊
+        Assert.False(g.Request(false, true));
+        Assert.True(g.Stale);
+        Assert.True(g.Tick(false, true));                      // 節流到期：補做一次（多次寫入合併為一次）
+        Assert.False(g.Stale);
+        Assert.False(g.Tick(false, true));                     // 無排隊：不重繪
+        Assert.True(g.Request(false, true));
+        Assert.False(g.Request(false, true));
+        Assert.False(g.Tick(hold: true, visible: true));       // 到期時正在操作：仍延後、保持待更新
+        Assert.True(g.Stale);
+        Assert.True(g.Request(false, true));                   // 操作結束之補做（FlushDeferred）
+        g.MarkRendered();
+        Assert.False(g.Stale);
+    }
+
+    [Fact]
+    public void LoadStrict_CorruptFile_IsDistinguishedFromLocked_AndSaveIsAtomic()
+    {
+        var path = TempPath();
+        try
+        {
+            File.WriteAllText(path, "{ \"Folders\": [ { \"Id\": ");  // 半份 JSON（非原子寫入中斷之樣貌）
+            var store = new NotesStore(path);
+            Assert.False(store.TryLoadStrict(out _, out var err, out var corrupt));
+            Assert.True(corrupt);
+            Assert.Contains("損毀", err);
+            Assert.Contains("匯入資料", err);                                       // 指引還原
+            Assert.Throws<NotesFileCorruptException>(() => store.LoadStrict());
+            Assert.Throws<NotesFileCorruptException>(() => store.AddToNamedFolderAndSave(new QueryResult("x", "", ""), "My Notes", null, DateTimeOffset.Now)); // 不以空結構覆寫損毀檔
+
+            var (s2, _) = Seed(path);                                                  // 改寫為正常檔
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                Assert.False(s2.TryLoadStrict(out _, out _, out var corrupt2));
+                Assert.False(corrupt2);                                                // 被鎖＝暫時讀不到，非損毀
+            }
+            Assert.True(s2.TrySave(s2.LoadStrict(), out _));
+            Assert.False(File.Exists(path + ".tmp"));                                  // 原子寫入：暫存檔已搬移取代
+        }
+        finally { File.Delete(path); File.Delete(path + ".tmp"); }
+    }
+
     // ---- 結構斷言（讀原始碼純文字）----
 
     [Fact]
@@ -463,6 +514,7 @@ public class NotesImportBackgroundTests
         Assert.Contains("_renaming || RowsHold", page);                                 // 重建樹必連帶重建條目區
         Assert.Contains("NotesPageSync.StructureSignature", sync);                      // 與兄弟順序無關
         Assert.Contains("NotesPageSync.DropIndex", Body(page, "private void OnEntryAreaDrop("));
+        Assert.Contains("_renderGate.Request(RowsHold, IsVisible)", Body(page, "private void RequestBackgroundRender("));   // 延後／節流走可測之閘
         var reload = Body(page, "public void Reload(");
         Assert.Contains("TryLoadStrict", reload);
         var xaml = ReadRepoFile("sysLingoIsland", "modPresent", "NotesImportResultWindow.xaml");
