@@ -15,8 +15,11 @@ public enum NotesImportStatus
     DuplicateInFile,
 }
 
-/// <summary>彙總確認表之一列：原文、狀態、預設勾選。</summary>
-public sealed record NotesImportEntry(string Text, NotesImportStatus Status, string ExistingFolder = "")
+/// <summary>
+/// 彙總確認表之一列：原文、狀態、預設勾選。<paramref name="Source"/>＝來源檔顯示名（#320 來源欄）；
+/// <paramref name="FirstSource"/>＝重複列之首見來源（同檔時與 Source 相同）。
+/// </summary>
+public sealed record NotesImportEntry(string Text, NotesImportStatus Status, string ExistingFolder = "", string Source = "", string FirstSource = "")
 {
     /// <summary>預設勾選＝新字。</summary>
     public bool DefaultSelected => Status == NotesImportStatus.New;
@@ -27,6 +30,21 @@ public sealed record NotesImportEntry(string Text, NotesImportStatus Status, str
 
 /// <summary>預掃描結果：列清單，或整檔拒收之原因（逾上限、空檔）。</summary>
 public sealed record NotesImportScan(IReadOnlyList<NotesImportEntry> Entries, string? Error)
+{
+    public bool IsOk => Error is null;
+}
+
+/// <summary>未納入之檔的原因類別（#320）：分類被拒（非清單檔、資料夾）或讀檔後不可用（讀不到、亂碼、沒有字）。</summary>
+public enum NotesImportExcludeKind { NotListFile, Folder, Unreadable, Misdecoded, Empty }
+
+/// <summary>未納入確認表之一檔（#320）：顯示名、原因類別、原因文字。</summary>
+public sealed record NotesImportExcluded(string FileName, NotesImportExcludeKind Kind, string Reason);
+
+/// <summary>可用來源之一檔（#320）：完整路徑、顯示名（同名檔附上層夾）、解析後之候選原文。</summary>
+public sealed record NotesImportSource(string Path, string DisplayName, IReadOnlyList<string> Lines);
+
+/// <summary>多檔載入結果（#320）：可用來源（依檔名自然排序）、讀後不可用之檔，或整批拒收之原因（合計逾 2 MB）。</summary>
+public sealed record NotesImportLoad(IReadOnlyList<NotesImportSource> Sources, IReadOnlyList<NotesImportExcluded> Excluded, string? Error)
 {
     public bool IsOk => Error is null;
 }
@@ -46,6 +64,9 @@ public static class NotesImport
 
     /// <summary>清單檔大小上限（先擋、不讀入記憶體）：單字清單不該這麼大，逾此多半是選錯檔。</summary>
     public const long MaxFileBytes = 2 * 1024 * 1024;
+
+    /// <summary>選檔對話框標題（#320：可多選、可拖放）。</summary>
+    public const string DialogTitle = "選擇英文清單（可多選；也可把檔案拖進筆記頁）";
 
     /// <summary>選檔對話框篩選。</summary>
     public const string DialogFilter = "英文清單 (*.txt;*.csv)|*.txt;*.csv|文字檔 (*.txt)|*.txt|CSV 檔 (*.csv)|*.csv";
@@ -137,25 +158,176 @@ public static class NotesImport
 
     /// <summary>同上，<paramref name="folderOfExisting"/> 回該字所在資料夾路徑（null＝不在筆記；空字串＝在但不知夾），供確認頁顯示「已在筆記（在「夾名」）」。</summary>
     public static NotesImportScan Scan(IEnumerable<string> lines, Func<string, string?> folderOfExisting)
+        => ScanSources(new[] { new NotesImportSource("", "", lines.ToList()) }, folderOfExisting);
+
+    /// <summary>
+    /// 合併預掃描（#320，純函式）：依 <paramref name="sources"/> 之順序（呼叫端已依檔名自然排序）與檔內行序串接後<b>一次</b>判定——
+    /// 同鍵只留首見（不論同檔或跨檔），非首見者標 <see cref="NotesImportStatus.DuplicateInFile"/> 並記首見來源；
+    /// <see cref="MaxLines"/>／<see cref="MaxWords"/> 以合併後計、逾限整批拒收。可用來源 ≥2 時用多檔文案，否則與單檔 <see cref="Scan(IEnumerable{string}, Func{string, string?})"/> 同。
+    /// </summary>
+    public static NotesImportScan ScanSources(IReadOnlyList<NotesImportSource> sources, Func<string, string?> folderOfExisting)
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var multi = sources.Count >= 2;
+        var firstSourceOf = new Dictionary<string, string>(StringComparer.Ordinal);
         var entries = new List<NotesImportEntry>();
         var lineCount = 0;
-        foreach (var raw in lines)
+        foreach (var src in sources)
         {
-            var text = (raw ?? "").Trim();
-            if (text.Length == 0) { continue; }
-            if (++lineCount > MaxLines) { return new NotesImportScan(entries, $"這份清單超過 {MaxLines} 行（含重複），不像單字清單——請確認是否選錯檔、或拆成幾份再匯入。"); }
-            var key = NoteEntry.KeyOf(text);
-            if (!seen.Add(key)) { entries.Add(new NotesImportEntry(text, NotesImportStatus.DuplicateInFile)); continue; }
-            var folder = folderOfExisting(key);
-            entries.Add(folder is null
-                ? new NotesImportEntry(text, NotesImportStatus.New)
-                : new NotesImportEntry(text, NotesImportStatus.AlreadyInNotes, folder));
+            foreach (var raw in src.Lines)
+            {
+                var text = (raw ?? "").Trim();
+                if (text.Length == 0) { continue; }
+                if (++lineCount > MaxLines)
+                {
+                    return new NotesImportScan(entries, multi
+                        ? $"這 {sources.Count} 個檔合計超過 {MaxLines} 行（含重複），不像單字清單——請確認是否選錯檔、或分幾批匯入。"
+                        : $"這份清單超過 {MaxLines} 行（含重複），不像單字清單——請確認是否選錯檔、或拆成幾份再匯入。");
+                }
+                var key = NoteEntry.KeyOf(text);
+                if (firstSourceOf.TryGetValue(key, out var first))
+                {
+                    entries.Add(new NotesImportEntry(text, NotesImportStatus.DuplicateInFile, "", src.DisplayName, first));
+                    continue;
+                }
+                firstSourceOf[key] = src.DisplayName;
+                var folder = folderOfExisting(key);
+                entries.Add(folder is null
+                    ? new NotesImportEntry(text, NotesImportStatus.New, "", src.DisplayName)
+                    : new NotesImportEntry(text, NotesImportStatus.AlreadyInNotes, folder, src.DisplayName));
+            }
         }
-        if (entries.Count == 0) { return new NotesImportScan(entries, "檔案裡沒有任何可匯入的字——每行一個英文單字或片語（csv 只取第一欄），空行會被忽略。"); }
-        if (seen.Count > MaxWords) { return new NotesImportScan(entries, $"這份清單有 {seen.Count} 個不重複的字，超過單次上限 {MaxWords} 字。請拆成幾份再匯入（不會只匯入前 {MaxWords} 個）。"); }
+        if (entries.Count == 0) { return new NotesImportScan(entries, EmptyFileMessage); }
+        var unique = firstSourceOf.Count;
+        if (unique > MaxWords)
+        {
+            return new NotesImportScan(entries, multi
+                ? $"這 {sources.Count} 個檔合計有 {unique} 個不重複的字，超過單次上限 {MaxWords} 字。請分幾批匯入（不會只匯入前 {MaxWords} 個）。"
+                : $"這份清單有 {unique} 個不重複的字，超過單次上限 {MaxWords} 字。請拆成幾份再匯入（不會只匯入前 {MaxWords} 個）。");
+        }
         return new NotesImportScan(entries, null);
+    }
+
+    /// <summary>單檔沒有任何可匯入之字（v4.16.0 文案）。</summary>
+    public const string EmptyFileMessage = "檔案裡沒有任何可匯入的字——每行一個英文單字或片語（csv 只取第一欄），空行會被忽略。";
+
+    /// <summary>單檔疑似非 UTF-8（v4.16.0 文案）。</summary>
+    public const string MisdecodedFileMessage = "這個檔案疑似不是 UTF-8 編碼（讀出了亂碼字元）。請在記事本「另存新檔」時把編碼改為 UTF-8，再匯入一次——不會拿亂碼去查詢。";
+
+    /// <summary>拖入全不可收時之提示（#320）。</summary>
+    public const string DropRejectedHint = "只能拖入 .txt／.csv 清單檔——這次拖進來的都不是，不會匯入。";
+
+    /// <summary>是否為可匯入之清單檔副檔名（`.txt`／`.csv`，不分大小寫；#320）。</summary>
+    public static bool IsListFile(string path)
+    {
+        var ext = Path.GetExtension(path ?? "");
+        return string.Equals(ext, ".txt", StringComparison.OrdinalIgnoreCase) || string.Equals(ext, ".csv", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 副檔名分類（#320，純函式；兩入口共用）：資料夾→「是資料夾」、非 `.txt`／`.csv`→「不是 .txt／.csv」，其餘接受（保留原順序、不遞迴展開資料夾）。
+    /// 被拒者依檔名自然排序，供「未納入」顯示。
+    /// </summary>
+    public static (IReadOnlyList<string> Accepted, IReadOnlyList<NotesImportExcluded> Rejected) SplitByExtension(IEnumerable<string>? paths, Func<string, bool> isDirectory)
+    {
+        var accepted = new List<string>();
+        var rejected = new List<NotesImportExcluded>();
+        foreach (var p in paths ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(p)) { continue; }
+            var name = Path.GetFileName(p.TrimEnd('\\', '/'));
+            if (isDirectory(p)) { rejected.Add(new NotesImportExcluded(name, NotesImportExcludeKind.Folder, "是資料夾（請拖入裡面的 .txt／.csv）")); }
+            else if (!IsListFile(p)) { rejected.Add(new NotesImportExcluded(name, NotesImportExcludeKind.NotListFile, "不是 .txt／.csv")); }
+            else { accepted.Add(p); }
+        }
+        rejected.Sort((a, b) => NotesStore.NaturalCompare(a.FileName, b.FileName));
+        return (accepted, rejected);
+    }
+
+    /// <summary>
+    /// 多檔載入（#320）：只收已通過 <see cref="SplitByExtension"/> 之清單檔；讀檔與長度以委派注入（單元測試不碰磁碟）。
+    /// 路徑 <c>GetFullPath</c> 後不分大小寫去重；依檔名自然排序（同名以完整路徑定先後；同名者顯示名附上層夾）；
+    /// 合計逾 <see cref="MaxFileBytes"/> 整批拒收（不讀）；逐檔讀不到／亂碼／沒有字→不納入、不連坐其他檔。
+    /// </summary>
+    public static NotesImportLoad LoadSources(IEnumerable<string> listFiles, Func<string, long> length, Func<string, string> read)
+    {
+        var paths = listFiles
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => { try { return Path.GetFullPath(p); } catch { return p; } })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(p => Path.GetFileName(p), Comparer<string>.Create(NotesStore.NaturalCompare))
+            .ThenBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var dupNames = paths.GroupBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        string Display(string p)
+        {
+            var name = Path.GetFileName(p);
+            if (!dupNames.Contains(name)) { return name; }
+            var parent = Path.GetFileName(Path.GetDirectoryName(p) ?? "");
+            return parent.Length > 0 ? parent + "\\" + name : name;
+        }
+
+        var excluded = new List<NotesImportExcluded>();
+        var sized = new List<string>();
+        long total = 0;
+        foreach (var p in paths)
+        {
+            try { total += length(p); sized.Add(p); }
+            catch (Exception ex) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Unreadable, "讀不到：" + ex.Message)); }
+        }
+        if (total > MaxFileBytes)
+        {
+            var mb = total / 1024 / 1024.0;
+            return new NotesImportLoad(Array.Empty<NotesImportSource>(), excluded, paths.Count == 1
+                ? $"這個檔案有 {mb:0.#} MB，超過清單檔上限 {MaxFileBytes / 1024 / 1024} MB——它可能不是單字清單。請確認後再選。"
+                : $"所選 {paths.Count} 個檔合計 {mb:0.#} MB，超過上限 {MaxFileBytes / 1024 / 1024} MB——裡面可能有不是單字清單的檔。請確認後再選，或分幾批匯入。");
+        }
+
+        var sources = new List<NotesImportSource>();
+        foreach (var p in sized)
+        {
+            string content;
+            try { content = read(p); }
+            catch (Exception ex) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Unreadable, "讀不到：" + ex.Message)); continue; }
+            if (LooksMisdecoded(content)) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Misdecoded, "疑似不是 UTF-8 編碼")); continue; }
+            var lines = ParseLines(content, IsCsv(p));
+            if (lines.Count == 0) { excluded.Add(new NotesImportExcluded(Display(p), NotesImportExcludeKind.Empty, "沒有可匯入的字")); continue; }
+            sources.Add(new NotesImportSource(p, Display(p), lines));
+        }
+        return new NotesImportLoad(sources, excluded, null);
+    }
+
+    /// <summary>
+    /// 全數不可用時之中止訊息（#320，純函式）：只有 1 個清單檔且無被拒檔→沿用 v4.16.0 之單檔文案；否則逐檔列「檔名（原因）」（被拒者在前）。
+    /// </summary>
+    public static string AllUnusableText(IReadOnlyList<NotesImportExcluded> excluded, int listFileCount)
+    {
+        if (listFileCount == 1 && excluded.Count == 1)
+        {
+            var only = excluded[0];
+            return only.Kind switch
+            {
+                NotesImportExcludeKind.Misdecoded => MisdecodedFileMessage,
+                NotesImportExcludeKind.Empty => EmptyFileMessage,
+                NotesImportExcludeKind.Unreadable => "讀不到這個檔案：" + only.Reason.Replace("讀不到：", ""),
+                _ => $"{only.FileName}（{only.Reason}）",
+            };
+        }
+        return "沒有可以匯入的檔——只接受 .txt（每行一字）與 .csv（取第一欄）：\n"
+               + string.Join("\n", excluded.Select(x => $"· {x.FileName}（{x.Reason}）"));
+    }
+
+    /// <summary>確認頁「未納入」一行（#320，純函式）：無則空字串（不顯示）。</summary>
+    public static string ExcludedText(IReadOnlyList<NotesImportExcluded> excluded)
+        => excluded.Count == 0 ? "" : "未納入：" + string.Join("；", excluded.Select(x => $"{x.FileName}（{x.Reason}）"));
+
+    /// <summary>確認頁首行之來源摘要（#320，純函式）：1 檔＝檔名；多檔＝「N 個檔（a、b…）」，逾 5 檔列前 5 個加「…等 N 個」。</summary>
+    public static string SourcesText(IReadOnlyList<string> names)
+    {
+        if (names.Count <= 1) { return names.Count == 1 ? names[0] : ""; }
+        const int show = 5;
+        var list = string.Join("、", names.Take(show)) + (names.Count > show ? $"…等 {names.Count} 個" : "");
+        return $"{names.Count} 個檔（{list}）";
     }
 
     /// <summary>單列狀態文案（純函式）——與設計 [modHmi筆記匯入確認頁] 狀態欄一一對應，文字即原因。</summary>
@@ -165,17 +337,19 @@ public static class NotesImport
         NotesImportStatus.AlreadyInNotes => e.ExistingFolder.Length > 0
             ? $"已在筆記「{e.ExistingFolder}」（預設略過；勾選＝重新查詢更新原筆）"
             : "已在筆記（預設略過；勾選＝重新查詢更新原筆）",
-        NotesImportStatus.DuplicateInFile => "檔內重複（只留第一筆）",
+        NotesImportStatus.DuplicateInFile => e.FirstSource.Length > 0 && !string.Equals(e.FirstSource, e.Source, StringComparison.Ordinal)
+            ? $"與「{e.FirstSource}」重複（只留第一筆）"
+            : "檔內重複（只留第一筆）",
         _ => "",
     };
 
-    /// <summary>表上方之計數摘要（純函式）：`共 5 列：新字 3、已在筆記 1、檔內重複 1`。</summary>
-    public static string SummaryText(IReadOnlyList<NotesImportEntry> entries)
+    /// <summary>表上方之計數摘要（純函式）：`共 5 列：新字 3、已在筆記 1、檔內重複 1`；多檔（可用來源 ≥2）末項為「重複」（含跨檔，#320）。</summary>
+    public static string SummaryText(IReadOnlyList<NotesImportEntry> entries, bool multiSource = false)
     {
         var n = entries.Count(e => e.Status == NotesImportStatus.New);
         var a = entries.Count(e => e.Status == NotesImportStatus.AlreadyInNotes);
         var d = entries.Count(e => e.Status == NotesImportStatus.DuplicateInFile);
-        return $"共 {entries.Count} 列：新字 {n}、已在筆記 {a}、檔內重複 {d}";
+        return $"共 {entries.Count} 列：新字 {n}、已在筆記 {a}、{(multiSource ? "重複" : "檔內重複")} {d}";
     }
 
     /// <summary>主鈕文案（純函式）：N＝勾選數、隨勾選即時更新；0 由呼叫端停用主鈕。</summary>

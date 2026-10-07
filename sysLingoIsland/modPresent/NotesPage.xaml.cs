@@ -110,6 +110,10 @@ public partial class NotesPage : UserControl
 
         NewFolderBtn.Click += (_, _) => CreateFolder(parent: null); // 一律建頂層；子資料夾走節點右鍵選單（檔案總管慣例）
         ImportListBtn.Click += (_, _) => BeginImportList();           // spec#14／#309：選檔→預掃描→確認頁→交 App 逐字查詢加入
+        PreviewDragEnter += OnFileDragEnter;                          // #320：整頁接受 .txt／.csv 檔案拖放（Preview 穿隧先攔 FileDrop，非 FileDrop 不碰）
+        PreviewDragOver += OnFileDragOver;
+        PreviewDragLeave += OnFileDragLeave;
+        PreviewDrop += OnFileDrop;
         AlphaSortBtn.Click += (_, _) => ToggleSort(NoteSortMode.Alpha);   // 字母（#126：同鈕再點翻方向）
         TimeSortBtn.Click += (_, _) => ToggleSort(NoteSortMode.Time);     // 日期
         ManualSortBtn.Click += (_, _) => ToggleSort(NoteSortMode.Manual); // 自訂順序（拖曳序 正/反）
@@ -143,65 +147,174 @@ public partial class NotesPage : UserControl
     /// </summary>
     public event Action<string, string, IReadOnlyList<string>>? ImportConfirmed;
 
+    /// <summary>匯入流程進行中（#320）：自按鈕／放下起至 <see cref="BeginImportFiles"/> 返回止；一律以 try/finally 解除，期間不受理新的拖放與按鈕。</summary>
+    private bool _importBusy;
+
+    /// <summary>「匯入清單」鈕：金鑰預檢在選檔之前；對話框可多選（#320），選完交 <see cref="BeginImportFiles"/>（與拖放同一條路）。</summary>
     private void BeginImportList()
     {
-        var folder = Selected;
-        if (folder is null) { ToastNotifier.Show("請先在左側選一個資料夾，再匯入清單。"); return; } // 守備性：樹恆預選首夾，平時不會到此
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
-        {
-            // 預檢在選檔之前（不讓使用者選完檔、勾完表才被告知）；App 端於執行前再檢一次為守備
-            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this),
-                "尚未設定 OPENAI_API_KEY，匯入後無法線上查詢。請先到主視窗「選項」分頁設定金鑰（或設定同名環境變數），再按「匯入清單」。",
-                "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
-            return;
-        }
-        var dlg = new Microsoft.Win32.OpenFileDialog
-        {
-            Filter = NotesImport.DialogFilter,
-            Multiselect = false,
-            Title = "選擇英文清單（.txt 每行一字／.csv 取第一欄）",
-        };
-        if (dlg.ShowDialog() != true) { return; }
-        var path = dlg.FileName;
-        string content;
+        if (_importBusy) { return; }
+        _importBusy = true;
         try
         {
-            var len = new System.IO.FileInfo(path).Length;
-            if (len > NotesImport.MaxFileBytes)
+            if (Selected is null) { ToastNotifier.Show("請先在左側選一個資料夾，再匯入清單。"); return; } // 守備性：樹恆預選首夾，平時不會到此
+            if (!CheckApiKey()) { return; } // 預檢在選檔之前（不讓使用者選完檔、勾完表才被告知）
+            var dlg = new Microsoft.Win32.OpenFileDialog
             {
-                System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this),
-                    $"這個檔案有 {len / 1024 / 1024.0:0.#} MB，超過清單檔上限 {NotesImport.MaxFileBytes / 1024 / 1024} MB——它可能不是單字清單。請確認後再選。",
-                    "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
-                return;
-            }
-            content = NotesImport.ReadAllText(path);
+                Filter = NotesImport.DialogFilter,
+                Multiselect = true,
+                Title = NotesImport.DialogTitle,
+            };
+            if (dlg.ShowDialog() != true) { return; }
+            BeginImportFiles(dlg.FileNames);
         }
-        catch (Exception ex) { ToastNotifier.Show("讀不到這個檔案：" + ex.Message); return; }
-        if (NotesImport.LooksMisdecoded(content))
+        finally { _importBusy = false; }
+    }
+
+    /// <summary>OPENAI_API_KEY 預檢：未設即指引至「選項」分頁並回 false（App 端於執行前再檢一次為守備）。</summary>
+    private bool CheckApiKey()
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY"))) { return true; }
+        System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this),
+            "尚未設定 OPENAI_API_KEY，匯入後無法線上查詢。請先到主視窗「選項」分頁設定金鑰（或設定同名環境變數），再按「匯入清單」或拖入清單檔。",
+            "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+        return false;
+    }
+
+    /// <summary>
+    /// 兩入口（按鈕多選、檔案拖放）之共用段（#320）：副檔名分類→多檔載入→合併預掃描→確認頁→<see cref="ImportConfirmed"/>。
+    /// 呼叫端負責 <see cref="_importBusy"/>；本函式不在 OLE 放下回呼內執行（拖放以 Dispatcher 延後呼叫）。
+    /// </summary>
+    private void BeginImportFiles(IReadOnlyList<string> paths)
+    {
+        var folder = Selected;
+        if (folder is null) { ToastNotifier.Show("請先在左側選一個資料夾，再匯入清單。"); return; }
+        var owner = System.Windows.Window.GetWindow(this);
+        var split = NotesImport.SplitByExtension(paths, System.IO.Directory.Exists);
+        var load = NotesImport.LoadSources(split.Accepted, p => new System.IO.FileInfo(p).Length, NotesImport.ReadAllText);
+        if (!load.IsOk)
         {
-            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this),
-                "這個檔案疑似不是 UTF-8 編碼（讀出了亂碼字元）。請在記事本「另存新檔」時把編碼改為 UTF-8，再匯入一次——不會拿亂碼去查詢。",
-                "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            System.Windows.MessageBox.Show(owner, load.Error, "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            return;
+        }
+        var excluded = split.Rejected.Concat(load.Excluded).ToList(); // 未納入：分類被拒者在前
+        if (load.Sources.Count == 0)
+        {
+            System.Windows.MessageBox.Show(owner, NotesImport.AllUnusableText(excluded, split.Accepted.Count), "匯入清單",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
             return;
         }
 
         var data = _store.LoadEnsured(); // 以磁碟現況判「已在筆記」（他處可能剛加入）
-        var scan = NotesImport.Scan(NotesImport.ParseLines(content, NotesImport.IsCsv(path)),
+        var scan = NotesImport.ScanSources(load.Sources,
             key => NotesStore.FolderOfKey(data, key) is { } f ? NotesStore.FolderPath(data, f.Id) : null); // 已在筆記者附所在夾（B-3）
         if (!scan.IsOk)
         {
-            System.Windows.MessageBox.Show(System.Windows.Window.GetWindow(this), scan.Error, "匯入清單",
+            System.Windows.MessageBox.Show(owner, scan.Error, "匯入清單",
                 System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
             return;
         }
         var folderPath = NotesStore.FolderPath(data, folder.Id) is { Length: > 0 } fp ? fp : folder.Name;
-        var win = new NotesImportWindow(System.IO.Path.GetFileName(path), folderPath, scan.Entries)
-        {
-            Owner = System.Windows.Window.GetWindow(this),
-        };
+        var win = new NotesImportWindow(load.Sources, excluded, folderPath, scan.Entries) { Owner = owner };
         if (win.ShowDialog() != true || win.SelectedWords.Count == 0) { return; }
         ImportConfirmed?.Invoke(folder.Id, folderPath, win.SelectedWords); // 結果表與 toast 用同一個路徑名（B-13）
     }
+
+    // ---- 檔案拖放匯入（#320）：頁層 Preview 穿隧先攔 FileDrop；非 FileDrop 一律不碰、不設 Handled（既有資料夾／條目拖曳原封走原處理器）----
+
+    /// <summary>本次拖曳狀態：綁定該次拖曳之 <c>e.Data</c> 參照——參照不同＝新的一次拖曳才重算分類與重置提示（頁內放開不可放置、Esc 只收到 Leave，不能靠離開時清空）。</summary>
+    private sealed class FileDragState
+    {
+        public required System.Windows.IDataObject Data { get; init; }
+        public required IReadOnlyList<string> Paths { get; init; }
+        public required int AcceptedCount { get; init; }
+        public bool Hinted { get; set; }
+    }
+
+    private FileDragState? _fileDrag;
+
+    private static bool IsFileDrag(DragEventArgs e) => e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop);
+
+    private FileDragState FileDragStateFor(DragEventArgs e)
+    {
+        if (_fileDrag is null || !ReferenceEquals(_fileDrag.Data, e.Data))
+        {
+            var paths = e.Data.GetData(System.Windows.DataFormats.FileDrop) as string[] ?? Array.Empty<string>();
+            _fileDrag = new FileDragState
+            {
+                Data = e.Data,
+                Paths = paths,
+                AcceptedCount = NotesImport.SplitByExtension(paths, System.IO.Directory.Exists).Accepted.Count, // 只在進入時算一次
+            };
+        }
+        return _fileDrag;
+    }
+
+    private void OnFileDragEnter(object sender, DragEventArgs e)
+    {
+        if (!IsFileDrag(e)) { return; }
+        var st = FileDragStateFor(e);
+        if (!_importBusy && st.AcceptedCount == 0 && !st.Hinted)
+        {
+            st.Hinted = true; // 一次拖曳只提示一次（游標跨子元素時 WPF 會重發 Enter）
+            ToastNotifier.Show(NotesImport.DropRejectedHint);
+        }
+        OnFileDragOver(sender, e);
+    }
+
+    private void OnFileDragOver(object sender, DragEventArgs e)
+    {
+        if (!IsFileDrag(e)) { return; }
+        var st = FileDragStateFor(e);
+        var canDrop = !_importBusy && st.AcceptedCount > 0 && Selected is not null;
+        e.Effects = canDrop ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+        if (canDrop) { ShowDropBanner(); } else { HideDropBanner(); }
+    }
+
+    private void OnFileDragLeave(object sender, DragEventArgs e)
+    {
+        if (!IsFileDrag(e)) { return; }
+        HideDropBanner(); // 任何結束方式皆不殘留；仍在頁內者下一個 DragOver 會再顯示
+        e.Handled = true;
+    }
+
+    private void OnFileDrop(object sender, DragEventArgs e)
+    {
+        if (!IsFileDrag(e)) { return; }
+        HideDropBanner();
+        e.Handled = true;
+        var st = FileDragStateFor(e);
+        _fileDrag = null;
+        if (_importBusy || st.AcceptedCount == 0) { e.Effects = DragDropEffects.None; return; }
+        e.Effects = DragDropEffects.Copy;
+        _importBusy = true;
+        var paths = st.Paths;
+        // 不得在 OLE 放下回呼內開任何模態視窗——否則拖曳來源（檔案總管）之 DoDragDrop 要等看表加查詢跑完才返回、總管卡住
+        Dispatcher.BeginInvoke(new Action(() => RunDroppedImport(paths)));
+    }
+
+    /// <summary>延後執行之拖放匯入：先把主視窗帶到前景（放下當下前景仍是檔案總管）、做與按鈕相同之守備，再走共用段；finally 解除忙碌。</summary>
+    private void RunDroppedImport(IReadOnlyList<string> paths)
+    {
+        try
+        {
+            System.Windows.Window.GetWindow(this)?.Activate();
+            if (!CheckApiKey()) { return; }
+            BeginImportFiles(paths);
+        }
+        finally { _importBusy = false; }
+    }
+
+    private void ShowDropBanner()
+    {
+        var f = Selected;
+        var path = f is null ? "" : (NotesStore.FolderPath(_data, f.Id) is { Length: > 0 } p ? p : f.Name);
+        DropBannerText.Text = $"放開後先開確認表——匯入到「{path}」";
+        DropBanner.Visibility = Visibility.Visible;
+    }
+
+    private void HideDropBanner() => DropBanner.Visibility = Visibility.Collapsed;
 
     private NoteFolder? Selected => (FolderTree.SelectedItem as TreeViewItem)?.Tag as NoteFolder;
 

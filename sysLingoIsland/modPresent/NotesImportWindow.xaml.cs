@@ -21,19 +21,34 @@ public partial class NotesImportWindow : Window
     /// <summary>單字欄固定寬（與 XAML 表頭同寬，使各列對齊）；狀態欄取餘寬，拉寬視窗即可看全夾路徑。</summary>
     private const double WordColumnWidth = 200;
 
+    /// <summary>來源欄固定寬（#320；超出省略號、ToolTip 全路徑）。</summary>
+    private const double SourceColumnWidth = 130;
+
     private readonly List<(NotesImportEntry Entry, CheckBox Box)> _rows = new();
 
     /// <summary>確認後之勾選原文（依表列順序）；取消為空。</summary>
     public IReadOnlyList<string> SelectedWords { get; private set; } = Array.Empty<string>();
 
-    public NotesImportWindow(string fileName, string folderName, IReadOnlyList<NotesImportEntry> entries)
+    /// <summary>來源顯示名→完整路徑（來源欄 ToolTip；#320）。</summary>
+    private readonly Dictionary<string, string> _sourcePaths = new(StringComparer.Ordinal);
+
+    /// <summary>（#320 起單檔亦走此入口）可用來源（已依檔名自然排序）、未納入之檔、目標夾全路徑、合併預掃描之列。</summary>
+    public NotesImportWindow(IReadOnlyList<NotesImportSource> sources, IReadOnlyList<NotesImportExcluded> excluded, string folderName, IReadOnlyList<NotesImportEntry> entries)
     {
         InitializeComponent();
+        foreach (var s in sources) { _sourcePaths[s.DisplayName] = s.Path; }
+        var names = sources.Select(s => s.DisplayName).ToList();
         HeaderText.Inlines.Add(new System.Windows.Documents.Run("來源："));
-        HeaderText.Inlines.Add(new System.Windows.Documents.Run(fileName) { FontWeight = FontWeights.SemiBold });
+        HeaderText.Inlines.Add(new System.Windows.Documents.Run(NotesImport.SourcesText(names)) { FontWeight = FontWeights.SemiBold });
         HeaderText.Inlines.Add(new System.Windows.Documents.Run("　→　目標資料夾："));
         HeaderText.Inlines.Add(new System.Windows.Documents.Run(folderName) { FontWeight = FontWeights.SemiBold });
-        SummaryText.Text = NotesImport.SummaryText(entries);
+        if (sources.Count > 1) { HeaderText.ToolTip = string.Join("\n", sources.Select(s => s.Path)); }
+        var excludedText = NotesImport.ExcludedText(excluded);
+        ExcludedText.Text = excludedText;
+        ExcludedText.Visibility = excludedText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SummaryText.Text = NotesImport.SummaryText(entries, multiSource: sources.Count >= 2);
+        // 拖放入口放下當下前景仍是檔案總管：前景鎖可能使 Activate 只閃工作列，故切一次 Topmost 保證疊在最上層可見（#320）
+        Loaded += (_, _) => { Topmost = true; Topmost = false; Activate(); };
 
         for (var i = 0; i < entries.Count; i++) { RowsPanel.Children.Add(MakeRow(entries[i], i)); }
 
@@ -54,6 +69,7 @@ public partial class NotesImportWindow : Window
         var grid = new Grid { Margin = new Thickness(0, 1, 0, 1) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(WordColumnWidth) }); // 固定寬：各列各自成 Grid，Auto 會使欄位逐列錯位
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SourceColumnWidth) }); // #320 來源欄
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var box = new CheckBox
@@ -99,7 +115,21 @@ public partial class NotesImportWindow : Window
                 : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA0, 0x6A, 0x20)),
         };
         AutomationProperties.SetAutomationId(status, RowAutomationIdPrefix + index + "Status");
-        Grid.SetColumn(status, 2);
+        Grid.SetColumn(status, 3);
+
+        var source = new TextBlock
+        {
+            Text = e.Source,
+            FontSize = 11,
+            Margin = new Thickness(4, 3, 4, 3),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x8A, 0x5A, 0x6D)),
+            ToolTip = _sourcePaths.TryGetValue(e.Source, out var full) && full.Length > 0 ? full : (e.Source.Length > 0 ? e.Source : null),
+        };
+        AutomationProperties.SetAutomationId(source, RowAutomationIdPrefix + index + "Source");
+        Grid.SetColumn(source, 2);
+        grid.Children.Add(source);
         grid.Children.Add(status);
 
         _rows.Add((e, box));
