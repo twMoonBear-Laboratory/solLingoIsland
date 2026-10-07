@@ -24,10 +24,22 @@ public partial class NotesImportWindow : Window
     /// <summary>來源欄固定寬（#320；超出省略號、ToolTip 全路徑）。</summary>
     private const double SourceColumnWidth = 130;
 
-    private readonly List<(NotesImportEntry Entry, CheckBox Box)> _rows = new();
+    /// <summary>中譯來源欄寬（#321；僅有自備中譯時出現，視窗寬與 MinWidth 同步加此值＋邊距）。</summary>
+    private const double TranslationColumnWidth = 150;
 
-    /// <summary>確認後之勾選原文（依表列順序）；取消為空。</summary>
-    public IReadOnlyList<string> SelectedWords { get; private set; } = Array.Empty<string>();
+    /// <summary>有自備中譯時視窗加寬量（#321）。</summary>
+    private const double TranslationWidthExtra = 160;
+
+    private readonly List<(NotesImportEntry Entry, CheckBox Box, TextBlock Status, TextBlock? Translation)> _rows = new();
+    private readonly IReadOnlyList<NotesImportEntry> _entries;
+    private readonly bool _multiSource;
+    private readonly bool _hasOwn;
+
+    /// <summary>確認後之勾選字＋自備中譯（依表列順序；切仍查線上時自備中譯皆空；#321）；取消為空。</summary>
+    public IReadOnlyList<NotesImportItem> SelectedItems { get; private set; } = Array.Empty<NotesImportItem>();
+
+    /// <summary>整批切換「有自備中譯的字也改查線上」是否勾選（#321）。</summary>
+    private bool ForceOnline => ForceOnlineBox.IsChecked == true;
 
     /// <summary>來源顯示名→完整路徑（來源欄 ToolTip；#320）。</summary>
     private readonly Dictionary<string, string> _sourcePaths = new(StringComparer.Ordinal);
@@ -36,6 +48,20 @@ public partial class NotesImportWindow : Window
     public NotesImportWindow(IReadOnlyList<NotesImportSource> sources, IReadOnlyList<NotesImportExcluded> excluded, string folderName, IReadOnlyList<NotesImportEntry> entries)
     {
         InitializeComponent();
+        _entries = entries;
+        _multiSource = sources.Count >= 2;
+        _hasOwn = NotesImport.AnyOwnTranslation(entries);
+        if (_hasOwn)
+        {
+            // #321：有自備中譯才出現中譯來源欄與整批切換；無則版面與 v4.18.0 完全相同
+            Width += TranslationWidthExtra;
+            MinWidth += TranslationWidthExtra;
+            TranslationHeaderColumn.Width = new GridLength(TranslationColumnWidth);
+            TranslationHeader.Visibility = Visibility.Visible;
+            ForceOnlineBox.Visibility = Visibility.Visible;
+            ForceOnlineBox.Checked += (_, _) => Refresh();
+            ForceOnlineBox.Unchecked += (_, _) => Refresh();
+        }
         foreach (var s in sources) { _sourcePaths[s.DisplayName] = s.Path; }
         var names = sources.Select(s => s.DisplayName).ToList();
         HeaderText.Inlines.Add(new System.Windows.Documents.Run("來源："));
@@ -47,21 +73,20 @@ public partial class NotesImportWindow : Window
         ExcludedText.Text = excludedText;
         ExcludedText.Visibility = excludedText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (excluded.Count > NotesImport.MaxExcludedShown) { ExcludedText.ToolTip = NotesImport.ExcludedFullText(excluded); }
-        SummaryText.Text = NotesImport.SummaryText(entries, multiSource: sources.Count >= 2);
         // 拖放入口放下當下前景仍是檔案總管：前景鎖可能使 Activate 只閃工作列，故切一次 Topmost 保證疊在最上層可見（#320）
         Loaded += (_, _) => { Topmost = true; Topmost = false; Activate(); };
 
         for (var i = 0; i < entries.Count; i++) { RowsPanel.Children.Add(MakeRow(entries[i], i)); }
 
-        SelectNewBtn.Click += (_, _) => { foreach (var (e, box) in _rows) { box.IsChecked = e.Status == NotesImportStatus.New; } Refresh(); };
-        SelectNoneBtn.Click += (_, _) => { foreach (var (_, box) in _rows) { box.IsChecked = false; } Refresh(); };
+        SelectNewBtn.Click += (_, _) => { foreach (var r in _rows) { r.Box.IsChecked = r.Entry.Status == NotesImportStatus.New; } Refresh(); };
+        SelectNoneBtn.Click += (_, _) => { foreach (var r in _rows) { r.Box.IsChecked = false; } Refresh(); };
         ConfirmBtn.Click += (_, _) =>
         {
-            SelectedWords = _rows.Where(r => r.Box.IsChecked == true).Select(r => r.Entry.Text).ToList();
-            if (SelectedWords.Count == 0) { return; }
+            SelectedItems = NotesImport.ToItems(_entries, i => _rows[i].Box.IsChecked == true, ForceOnline);
+            if (SelectedItems.Count == 0) { return; }
             DialogResult = true;
         };
-        CancelBtn.Click += (_, _) => { SelectedWords = Array.Empty<string>(); DialogResult = false; };
+        CancelBtn.Click += (_, _) => { SelectedItems = Array.Empty<NotesImportItem>(); DialogResult = false; };
         Refresh();
     }
 
@@ -71,6 +96,7 @@ public partial class NotesImportWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(WordColumnWidth) }); // 固定寬：各列各自成 Grid，Auto 會使欄位逐列錯位
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SourceColumnWidth) }); // #320 來源欄
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(_hasOwn ? TranslationColumnWidth : 0) }); // #321 中譯來源欄
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var box = new CheckBox
@@ -116,7 +142,7 @@ public partial class NotesImportWindow : Window
                 : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA0, 0x6A, 0x20)),
         };
         AutomationProperties.SetAutomationId(status, RowAutomationIdPrefix + index + "Status");
-        Grid.SetColumn(status, 3);
+        Grid.SetColumn(status, 4);
 
         var source = new TextBlock
         {
@@ -133,15 +159,48 @@ public partial class NotesImportWindow : Window
         grid.Children.Add(source);
         grid.Children.Add(status);
 
-        _rows.Add((e, box));
+        TextBlock? translation = null;
+        if (_hasOwn)
+        {
+            translation = new TextBlock
+            {
+                FontSize = 11,
+                Margin = new Thickness(4, 3, 4, 3),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            AutomationProperties.SetAutomationId(translation, RowAutomationIdPrefix + index + "Translation");
+            Grid.SetColumn(translation, 3);
+            grid.Children.Add(translation);
+        }
+
+        _rows.Add((e, box, status, translation));
         return grid;
     }
 
     private void Refresh()
     {
+        var force = ForceOnline;
         var n = _rows.Count(r => r.Box.IsChecked == true);
-        ConfirmBtn.Content = NotesImport.ConfirmButtonText(n);
+        var online = _rows.Count(r => r.Box.IsChecked == true && (force || !r.Entry.HasOwnTranslation)); // #321：只計將線上查詢者
+        ConfirmBtn.Content = NotesImport.ConfirmButtonText(n, online);
         ConfirmBtn.IsEnabled = n > 0;
-        CostText.Text = NotesImport.CostText(n);
+        CostText.Text = NotesImport.CostText(n, online);
+        SummaryText.Text = NotesImport.SummaryText(_entries, _multiSource, force);
+        foreach (var r in _rows)
+        {
+            var st = NotesImport.StatusText(r.Entry, force);
+            r.Status.Text = st;
+            r.Status.ToolTip = st;
+            if (!r.Box.IsEnabled) { r.Box.ToolTip = st + "——不能另外勾選"; }
+            if (r.Translation is { } t)
+            {
+                t.Text = NotesImport.TranslationSourceText(r.Entry, force);
+                t.ToolTip = t.Text.Length > 0 ? t.Text : null;
+                t.Foreground = !force && r.Entry.HasOwnTranslation
+                    ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2F, 0x6A, 0x8A))
+                    : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x8A, 0x5A, 0x6D));
+            }
+        }
     }
 }

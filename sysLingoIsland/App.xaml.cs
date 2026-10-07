@@ -414,9 +414,10 @@ public partial class App : System.Windows.Application
     /// <see cref="NotesImportRunner"/> 接既有 <see cref="QueryService"/>（單字查字義／片語整句翻譯，與字典頁手動查詢同規則）
     /// 寫入目前選取夾（含子夾）一字一存；結束顯示結果表（成功／略過／失敗逐字原因）、重載筆記頁與字典「加入至」下拉。
     /// </summary>
-    private void RunNotesImport(string folderId, string folderName, IReadOnlyList<string> words)
+    private void RunNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> words)
     {
         if (words.Count == 0) { return; }
+        if (words.All(w => w.IsOwn)) { RunOwnOnlyNotesImport(folderId, folderName, words); return; } // #321：全部自備中譯——非 AI 動作、不查詢
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
         {
             // 起跑前預檢（與字典頁「金鑰未設定時顯示明確錯誤與設定指引」同基準）：每個字都會失敗，不讓使用者等逾時
@@ -431,9 +432,9 @@ public partial class App : System.Windows.Application
         {
             outcome = await runner.RunAsync(words, folderId, NoteDefaults.ColorHex, report, ct);
             var shownFolder = outcome.TargetFolderMissing ? outcome.FallbackFolder : folderName;
-            report(NotesImport.ResultText(outcome.Added, outcome.Updated, outcome.Skipped, outcome.Failed, shownFolder, outcome.AddedWords)
+            report(NotesImport.ResultText(outcome.Added, outcome.Updated, outcome.Skipped, outcome.Failed, shownFolder, outcome.AddedWords, outcome.OwnTranslationUsed)
                    + (outcome.TargetFolderMissing ? $"\n（目標資料夾「{folderName}」在匯入途中已不存在" + (outcome.Added > 0 ? $"，已加入的字改放到第一個資料夾「{outcome.FallbackFolder}」。）" : "。）") : "")
-                   + (outcome.Cancelled ? "\n（已取消——已加入的字保留，其餘未查詢。）" : ""));
+                   + (outcome.Cancelled ? "\n（已取消——已加入的字保留，其餘未加入。）" : ""));
             return null; // 費用已於確認頁前置揭露；不顯用量
         }, autoCloseOnSuccess: false, showCost: false);
 
@@ -443,6 +444,29 @@ public partial class App : System.Windows.Application
         {
             var shownFolder = outcome.TargetFolderMissing ? outcome.FallbackFolder : folderName;
             ToastNotifier.Show($"✓ 已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "")
+                               + (outcome.Failed.Count > 0 ? $"（{outcome.Failed.Count} 字失敗）" : ""));
+        }
+    }
+
+    /// <summary>
+    /// 匯入清單之全自備中譯分支（spec#14／#321）：勾選之字全部帶 csv 第二欄自備中譯——不檢金鑰、不建查詢服務、不開 AI 動作進度頁
+    /// （那是付費 AI 動作之 surface）；執行器以「被呼叫即擲例外」之守衛委派建構、同步一次載入一次存檔，結果以訊息框呈現。
+    /// </summary>
+    private void RunOwnOnlyNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> items)
+    {
+        var runner = new NotesImportRunner(_notesStore, NotesImportRunner.NoLookup);
+        var outcome = runner.RunOwnOnly(items, folderId, NoteDefaults.ColorHex);
+        var shownFolder = outcome.TargetFolderMissing ? outcome.FallbackFolder : folderName;
+        _notesPage?.Reload();
+        _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
+        System.Windows.MessageBox.Show(_main,
+            NotesImport.ResultText(outcome.Added, outcome.Updated, outcome.Skipped, outcome.Failed, shownFolder, outcome.AddedWords, outcome.OwnTranslationUsed)
+            + (outcome.TargetFolderMissing ? $"\n（目標資料夾「{folderName}」已不存在，已加入的字改放到第一個資料夾「{outcome.FallbackFolder}」。）" : ""),
+            "匯入清單", System.Windows.MessageBoxButton.OK,
+            outcome.Failed.Count > 0 ? System.Windows.MessageBoxImage.Warning : System.Windows.MessageBoxImage.Information);
+        if (outcome.Added > 0 || outcome.Updated > 0)
+        {
+            ToastNotifier.Show($"✓ 已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") + "（自備中譯、未查詢）"
                                + (outcome.Failed.Count > 0 ? $"（{outcome.Failed.Count} 字失敗）" : ""));
         }
     }

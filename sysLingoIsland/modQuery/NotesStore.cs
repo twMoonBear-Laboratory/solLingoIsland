@@ -47,6 +47,9 @@ public sealed class NotesData
 /// <summary>加入我的筆記之結果（供 toast 回饋）。</summary>
 public enum NoteAddResult { Added, AlreadyExists, Empty }
 
+/// <summary>自備中譯批次寫入之逐字結果（spec#14／#321）：加入新筆、以自備中譯更新既有筆（只換中譯）、或原文為空。</summary>
+public enum OwnTranslationWriteResult { Added, Updated, Empty }
+
 /// <summary>
 /// 我的筆記本機儲存（[modQuery模組] 我的筆記儲存契約，spec#7；Issue #34 樹化）。存
 /// <c>%APPDATA%\LingoIsland\notes.json</c>。資料夾為**多層樹**（向後相容舊平面）；加入以英文原文正規化
@@ -94,12 +97,16 @@ public sealed class NotesStore
         }
     }
 
+    /// <summary>本實體成功落地之存檔次數（#321：供測試斷言批次寫入只寫一次；不影響行為）。</summary>
+    public int SaveCount { get; private set; }
+
     public void Save(NotesData d)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             File.WriteAllText(_path, JsonSerializer.Serialize(d, Opts));
+            SaveCount++;
         }
         catch { /* 寫入失敗不影響主流程 */ }
     }
@@ -161,6 +168,7 @@ public sealed class NotesStore
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             File.WriteAllText(_path, JsonSerializer.Serialize(d, Opts));
+            SaveCount++;
             error = "";
             return true;
         }
@@ -189,7 +197,7 @@ public sealed class NotesStore
     /// 留在原夾、不重複建立、**保留 Id／AddedAt／Color／練習分數**（字沒變、成績不歸零——與 <see cref="UpdateEntryContent"/> 之「原文已變」語意不同）；
     /// 原文採既有筆記之寫法（不以 AI 回之大小寫整形覆蓋）。找不到該鍵（他處同時刪除）回 false、不寫入。
     /// </summary>
-    public bool RefreshEntryByKeyAndSave(QueryResult r)
+    public bool RefreshEntryByKeyAndSave(QueryResult r, bool keepPhonetic = false)
     {
         var key = NoteEntry.KeyOf(r.Original);
         if (string.IsNullOrEmpty(key)) { return false; }
@@ -199,12 +207,44 @@ public sealed class NotesStore
             var i = f.Entries.FindIndex(e => e.Key == key);
             if (i >= 0)
             {
-                f.Entries[i] = f.Entries[i] with { Phonetic = r.Phonetic, Translation = r.Translation };
+                f.Entries[i] = keepPhonetic
+                    ? f.Entries[i] with { Translation = r.Translation }                       // #321：以自備中譯更新——只換中譯、保留原音標
+                    : f.Entries[i] with { Phonetic = r.Phonetic, Translation = r.Translation };
                 if (!TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
                 return true;
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// 自備中譯之批次寫入（spec#14／#321）：**一次載入、一次存檔**——語意逐字同 <see cref="AddToFolderAndSave"/>（跨全樹去重、底色、
+    /// 目標夾不在退回第一個頂層夾、第 k 個加入者插在 <paramref name="insertAt"/>＋k）＋已在筆記者同 <see cref="RefreshEntryByKeyAndSave"/>
+    /// 之 <c>keepPhonetic</c>（只換中譯、保留音標／Id／底色／練習分數）。存檔失敗擲出 <see cref="IOException"/>、筆記檔不變（整批未落地）。
+    /// </summary>
+    public IReadOnlyList<OwnTranslationWriteResult> AddOrRefreshOwnTranslationsAndSave(IReadOnlyList<QueryResult> results, string folderId, string? colorHex, DateTimeOffset now, int insertAt)
+    {
+        var d = LoadEnsured();
+        var folder = FindFolder(d, folderId) ?? d.Folders[0];
+        var idx = Math.Clamp(insertAt, 0, folder.Entries.Count);
+        var outcome = new List<OwnTranslationWriteResult>();
+        foreach (var r in results)
+        {
+            var entry = NoteEntry.From(r, now) with { Color = colorHex ?? "" };
+            if (string.IsNullOrEmpty(entry.Key)) { outcome.Add(OwnTranslationWriteResult.Empty); continue; }
+            var existing = AllFolders(d).Select(f => (f, i: f.Entries.FindIndex(e => e.Key == entry.Key))).FirstOrDefault(x => x.i >= 0);
+            if (existing.f is not null)
+            {
+                existing.f.Entries[existing.i] = existing.f.Entries[existing.i] with { Translation = r.Translation };
+                outcome.Add(OwnTranslationWriteResult.Updated);
+                continue;
+            }
+            folder.Entries.Insert(Math.Min(idx, folder.Entries.Count), entry);
+            idx++;
+            outcome.Add(OwnTranslationWriteResult.Added);
+        }
+        if (outcome.Any(o => o != OwnTranslationWriteResult.Empty) && !TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+        return outcome;
     }
 
     /// <summary>
