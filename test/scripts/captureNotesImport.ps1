@@ -36,6 +36,13 @@
     ⑲ 3 字 txt 實按加入後最小化主視窗→toast「匯入清單已結束——打開主視窗看結果」、結果視窗未開→還原→結果視窗才開。
     ⑱ 20 字 txt 實按加入→PostMessage(WM_CLOSE) 關主視窗→確認框「匯入進行中」→按「否」：app 仍在、匯入續進→再關→按「是」：行程結束、已加入者保留。
     （⑯ 另以真實 OLE 拖放一個 txt：不可放置、toast 同句、不開確認頁；⑮ 另斷言使用者之「字母」排序於匯入後仍保留。）
+  #323（重匯只勾上次失敗字，spec#14 擴充）增走（受測 app 起手另帶 LINGOISLAND_IMPORT_FAKE_FAIL_ONCE＝unit10 之三字；起手刪 import-failures.json；
+  ⑳–㉒ 排在 ⑲ 之後、⑱ 之前——⑱ 會結束受測 app，注入失敗為同一行程之語意）：
+    ⑳ unit10-retry.txt（7 字）→確認頁「只勾上次失敗字」停用且停用時說明可得→取消勾 atlas→實按「查詢並加入 6 字」→結果「已加入 3 字…失敗 3 字」
+       →import-failures.json 恰一筆、Path＝樣本完整路徑、Words＝注入三字（依清單序）、無中譯字樣。
+    ㉑ 再選同檔→預設勾 4 列→鈕「只勾上次失敗字（3）」、三字狀態以「上次匯入失敗；」起首→手勾一列已在筆記→按鈕→恰勾三列、主鈕「查詢並加入 3 字」
+       →手冊圖 notes-import-retry-failed.png→實按→結果「已加入 3 字」→紀錄檔已無該路徑。
+    ㉒ 再選同檔→鈕停用→取消（零呼叫）。
   落點被他窗覆蓋即據實中止（不判 PASS）。
 
   查詢並加入之成功／失敗路徑由 NotesImportRunnerTests 以 fake 委派覆蓋（零額度）；本腳本刻意只走到確認頁並取消，不花 OpenAI 額度（USR 常設裁定）。
@@ -94,6 +101,13 @@ Write-Host "# II.參考準備 ================================" -ForegroundColor
   $unit8Path = Join-Path $sampleDir "unit8-exit.txt"
   $unit9Path = Join-Path $sampleDir "unit9-minimized.txt"
   $minWords  = @("orchard", "meadow", "prairie")
+  # #323 樣本（7 字、與本腳本其他樣本字不重疊）：首字不在注入名單（免觸發早停）；quill／inkwell／scroll 於本行程第一次假查詢時失敗；atlas 於 ⑳ 不勾（不查、不記）
+  $retryWords = @("lantern", "quill", "parchment", "inkwell", "candle", "scroll", "atlas")
+  $retryFail  = @("quill", "inkwell", "scroll")
+  $unit10Path = Join-Path $sampleDir "unit10-retry.txt"
+  $retryPng   = Join-Path $repoRoot "docs\manual-assets\notes-import-retry-failed.png"
+  $failLog    = Join-Path $appData "import-failures.json"
+  $origFailOnce = $env:LINGOISLAND_IMPORT_FAKE_FAIL_ONCE
   $bgPng     = Join-Path $repoRoot "docs\manual-assets\notes-import-background.png"
   $origFakeMs = $env:LINGOISLAND_IMPORT_FAKE_LOOKUP_MS
   $origApiKey = $env:OPENAI_API_KEY
@@ -416,7 +430,7 @@ public static class Win32Post
   function Count-Words { param([string[]]$Words) $j = Get-Content (Join-Path $appData "notes.json") -Raw -Encoding UTF8 | ConvertFrom-Json; return @(Get-AllFolders $j.Folders | ForEach-Object { @($_.Entries) } | Where-Object { $Words -contains $_.Original }).Count }
   # 選探針夾→匯入鈕→檔案對話框選檔→確認頁→斷言主鈕文案→實按（只在主鈕為預期之全線上文案時才按）
   function Start-BackgroundImport {
-    param([string]$Path, [int]$N, [string]$Tag)
+    param([string]$Path, [int]$N, [string]$Tag, [switch]$OpenOnly)
     Set-WindowForeground -Hwnd $hwnd | Out-Null; Start-Sleep -Milliseconds 300
     $tree = Find-ByAutomationId -Root $root -Id "FolderTree"
     $pt = @($tree.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Text))) | Where-Object { $_.Current.Name -eq $probeName }) | Select-Object -First 1
@@ -435,6 +449,7 @@ public static class Win32Post
     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
     $c = Wait-Confirm -TimeoutSec 15
     if ($null -eq $c) { throw "$Tag：選檔後未見確認頁" }
+    if ($OpenOnly) { return $c }   # #323：只開到確認頁（由呼叫端操作勾選與按鈕）
     $b = Find-ByAutomationId -Root $c -Id "NotesImportConfirm"
     if ($b.Current.Name -ne "查詢並加入 $N 字") { throw "$Tag：主鈕「$($b.Current.Name)」≠「查詢並加入 $N 字」——不實按，據實中止" }
     Invoke-El $b
@@ -463,6 +478,8 @@ try {
   $data.Folders = @(@($data.Folders) | Where-Object { $_.Id -ne $probeId })
   Remove-WordsEverywhere $data.Folders $sampleOwnWords   # #321：樣本字不得預先存在（APPDATA 已備份、finally 還原）
   Remove-WordsEverywhere $data.Folders ($bgWords + $cancelWords + $exitWords + $minWords)   # #322 樣本字同理
+  Remove-WordsEverywhere $data.Folders $retryWords   # #323 樣本字同理
+  if (Test-Path $failLog) { Remove-Item $failLog -Force }   # #323：自無紀錄起手（APPDATA 已備份、finally 還原）
   $mkEntry = { param($w) [pscustomobject]@{ Id = ([guid]::NewGuid().ToString("N")); AddedAt = "2026-10-06T00:00:00.0000000+08:00"; Original = $w; Phonetic = "[$w]"; Translation = "譯:$w"; Color = ""; PracticeScore = -1 } }
   $data.Folders = @($data.Folders) + ([pscustomobject]@{
     Id = $probeId; Name = $probeName; Folders = @(); Sort = $null
@@ -497,6 +514,7 @@ try {
   # #321：受測 app 以明顯無效之假金鑰啟動（子行程繼承本行程環境變數）——金鑰預檢照常通過，萬一誤觸查詢也只得 401、不計費；finally 還原
   $env:OPENAI_API_KEY = "sk-e2e-invalid-placeholder-not-a-real-key-321"
   $env:LINGOISLAND_IMPORT_FAKE_LOOKUP_MS = "1200"   # #322 測試縫：延遲假查詢（零網路、零額度）；finally 還原
+  $env:LINGOISLAND_IMPORT_FAKE_FAIL_ONCE = ($retryFail -join ",")   # #323 測試縫：只對 unit10 之三字於本行程第一次查詢時注入失敗；finally 還原
   $app  = Start-AppAndGetWindow -ExePath $ExePath -TimeoutSec 30
   $hwnd = $app.Hwnd
   Set-WindowMaximized -Hwnd $hwnd | Out-Null
@@ -1014,6 +1032,88 @@ try {
   }
   #endregion
 
+  #region P3.#323 ⑳–㉒ 重匯只勾上次失敗字 --------------------------------
+  Write-Host "## P3.#323 ⑳–㉒ 只勾上次失敗字 --------------------------------" -ForegroundColor Cyan
+  [System.IO.File]::WriteAllText($unit10Path, ($retryWords -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+  if (Test-Path $failLog) { $fails += "⑳：起手即有 import-failures.json（之前各步不應有失敗）" }
+  # ⑳ 首次匯入：無紀錄＝鈕停用；不勾 atlas；三字注入失敗
+  $c20 = Start-BackgroundImport -Path $unit10Path -N 0 -Tag "⑳" -OpenOnly
+  $sf = Find-ByAutomationId -Root $c20 -Id "NotesImportSelectFailed"
+  if ($null -eq $sf) { throw "⑳：確認頁找不到「只勾上次失敗字」鈕（NotesImportSelectFailed）——#323 未落地" }
+  Write-Host "* ⑳ 鈕＝「$($sf.Current.Name)」啟用＝$($sf.Current.IsEnabled)／說明＝「$($sf.Current.HelpText)」"
+  if ($sf.Current.IsEnabled) { $fails += "⑳：無紀錄時「只勾上次失敗字」卻可按" }
+  if ($sf.Current.HelpText -notlike "*沒有上次匯入失敗的紀錄*") { $fails += "⑳：停用時之說明（ToolTip）取不到或不符（實得「$($sf.Current.HelpText)」）" }
+  $atlasBox = @($c20.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::CheckBox))) | Where-Object { $_.Current.Name -eq "atlas" }) | Select-Object -First 1
+  if ($null -eq $atlasBox) { throw "⑳：確認頁找不到 atlas 列" }
+  $atlasBox.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle(); Start-Sleep -Milliseconds 300
+  $b20 = Find-ByAutomationId -Root $c20 -Id "NotesImportConfirm"
+  if ($b20.Current.Name -ne "查詢並加入 6 字") { Close-Confirm $c20; throw "⑳：取消勾 atlas 後主鈕「$($b20.Current.Name)」≠「查詢並加入 6 字」——不實按，據實中止" }
+  Invoke-El $b20; Write-Host "* ⑳：已實按「查詢並加入 6 字」"
+  $res20 = Wait-ResultWindow -TimeoutSec 30
+  if ($null -eq $res20) { $fails += "⑳：30 秒內未見結果視窗" }
+  else {
+    $rr = Read-ResultWindow $res20
+    Write-Host "* ⑳ 結果：「$($rr.Body)」"
+    if ($rr.Body -notlike "匯入完成：已加入 3 字*失敗 3 字*") { $fails += "⑳：結果非「已加入 3 字…失敗 3 字」" }
+    if ($rr.Body -notlike "*按確認表上的「只勾上次失敗字」即可只重試這幾個*") { $fails += "⑳：結果失敗段未指向「只勾上次失敗字」" }
+    Close-ResultWindow $res20
+  }
+  $logText = if (Test-Path $failLog) { Get-Content $failLog -Raw -Encoding UTF8 } else { "" }
+  $log = if ($logText) { $logText | ConvertFrom-Json } else { $null }
+  $files = @($log.Files)
+  Write-Host "* ⑳ 紀錄檔：$($files.Count) 筆／Path＝$($files[0].Path)／Words＝$(@($files[0].Words) -join ',')"
+  if ($files.Count -ne 1 -or $files[0].Path -ne (Resolve-Path $unit10Path).Path -or ((@($files[0].Words) -join ",") -ne ($retryFail -join ","))) { $fails += "⑳：紀錄檔內容不符（應恰一筆、完整路徑、三字依清單序）" }
+  if ($logText -like "*〔測試假查詢〕*" -or $logText -like "*模擬失敗*") { $fails += "⑳：紀錄檔含中譯或失敗原因（隱私）" }
+
+  # ㉑ 重匯：鈕啟用 N＝3、三字前置標記；手勾一列已在筆記→按鈕→恰勾三列
+  $c21 = Start-BackgroundImport -Path $unit10Path -N 0 -Tag "㉑" -OpenOnly
+  $rows = @(Get-RowSnapshot $c21)
+  $checked = @($rows | Where-Object Checked | ForEach-Object Name)
+  Write-Host "* ㉑ 預設勾＝$($checked -join ',')"
+  if ($checked.Count -ne 4) { $fails += "㉑：預設勾選數 $($checked.Count)≠4（失敗三字＋atlas）" }
+  $sf = Find-ByAutomationId -Root $c21 -Id "NotesImportSelectFailed"
+  Write-Host "* ㉑ 鈕＝「$($sf.Current.Name)」啟用＝$($sf.Current.IsEnabled)"
+  if (-not $sf.Current.IsEnabled -or $sf.Current.Name -ne "只勾上次失敗字（3）") { $fails += "㉑：鈕未啟用或文字非「只勾上次失敗字（3）」" }
+  foreach ($w in $retryFail) {
+    $st = ($rows | Where-Object Name -eq $w | Select-Object -First 1).Status
+    if (-not "$st".StartsWith("上次匯入失敗；")) { $fails += "㉑：$w 之狀態未以「上次匯入失敗；」起首（實得「$st」）" }
+  }
+  $lanternBox = @($c21.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::CheckBox))) | Where-Object { $_.Current.Name -eq "lantern" }) | Select-Object -First 1
+  $lanternBox.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle(); Start-Sleep -Milliseconds 300   # 手勾一列已在筆記
+  Invoke-El $sf; Start-Sleep -Milliseconds 500
+  $after = @(Get-RowSnapshot $c21 | Where-Object Checked | ForEach-Object Name)
+  $b21 = Find-ByAutomationId -Root $c21 -Id "NotesImportConfirm"
+  Write-Host "* ㉑ 按鈕後勾＝$($after -join ',')／主鈕＝「$($b21.Current.Name)」"
+  if (($after -join ",") -ne ($retryFail -join ",")) { $fails += "㉑：按鈕後勾選非恰為三字（實得 $($after -join ',')）" }
+  if ($b21.Current.Name -ne "查詢並加入 3 字") { Close-Confirm $c21; throw "㉑：主鈕「$($b21.Current.Name)」≠「查詢並加入 3 字」——不實按，據實中止" }
+  Save-WindowShot -Hwnd ([IntPtr]$c21.Current.NativeWindowHandle) -Path (Join-Path $OutDir "12-retry-failed.png")
+  Copy-Item (Join-Path $OutDir "12-retry-failed.png") $retryPng -Force
+  Write-Host "* 手冊圖已產出（只勾上次失敗字）：$retryPng"
+  Invoke-El $b21
+  $res21 = Wait-ResultWindow -TimeoutSec 20
+  if ($null -eq $res21) { $fails += "㉑：未見結果視窗" }
+  else {
+    $rr = Read-ResultWindow $res21
+    Write-Host "* ㉑ 結果：「$($rr.Body)」"
+    if ($rr.Body -notlike "匯入完成：已加入 3 字*" -or $rr.Body -like "*失敗*") { $fails += "㉑：重試結果非「已加入 3 字」且無失敗" }
+    Close-ResultWindow $res21
+  }
+  $logText = if (Test-Path $failLog) { Get-Content $failLog -Raw -Encoding UTF8 } else { "" }
+  $still = $logText -and (@(($logText | ConvertFrom-Json).Files) | Where-Object { $_.Path -eq (Resolve-Path $unit10Path).Path }).Count -gt 0
+  Write-Host "* ㉑ 紀錄檔仍有該路徑＝$still"
+  if ($still) { $fails += "㉑：全數成功後紀錄未清除" }
+
+  # ㉒ 再開：鈕停用→取消（零呼叫）
+  $c22 = Start-BackgroundImport -Path $unit10Path -N 0 -Tag "㉒" -OpenOnly
+  $sf = Find-ByAutomationId -Root $c22 -Id "NotesImportSelectFailed"
+  Write-Host "* ㉒ 鈕＝「$($sf.Current.Name)」啟用＝$($sf.Current.IsEnabled)"
+  if ($sf.Current.IsEnabled) { $fails += "㉒：全數成功後再開，鈕仍可按" }
+  Close-Confirm $c22
+  if ($null -ne (Wait-ResultWindow -TimeoutSec 1)) { $fails += "㉒：取消後出現結果視窗（不應查詢）" }
+  if ((Get-LedgerBytes).Length -ne $ledgerBefore.Length) { $fails += "⑳–㉒：AI 花費帳本有變動（輔證）" }
+  if (@($fails | Where-Object { $_ -match "^[⑳㉑㉒]" }).Count -eq 0) { Write-Host "* [OK] ⑳–㉒ 只勾上次失敗字：記下、按鈕只勾失敗字、成功後清除" -ForegroundColor Green }
+  #endregion
+
   #region Q.#322 ⑱ 匯入中結束 app：確認框、否＝繼續、是＝結束且已加入者保留 --------------------------------
   Write-Host "## Q.#322 ⑱ 結束確認 --------------------------------" -ForegroundColor Cyan
   Start-BackgroundImport -Path $unit8Path -N 20 -Tag "⑱"
@@ -1060,6 +1160,7 @@ finally {
   Start-Sleep -Milliseconds 500
   $env:OPENAI_API_KEY = $origApiKey   # #321：還原本行程之金鑰環境變數
   $env:LINGOISLAND_IMPORT_FAKE_LOOKUP_MS = $origFakeMs   # #322：還原測試縫
+  $env:LINGOISLAND_IMPORT_FAKE_FAIL_ONCE = $origFailOnce # #323：還原測試縫
   if (Test-Path $backupDir) {
     Remove-Item -Path $appData -Recurse -Force -ErrorAction SilentlyContinue
     Copy-Item -Path $backupDir -Destination $appData -Recurse -Force
@@ -1079,6 +1180,6 @@ if ($fails.Count -gt 0) {
   $fails | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
   exit 1
 }
-Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪、#321 ⑫–⑭、#322 ⑮–⑲ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
+Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪、#321 ⑫–⑭、#322 ⑮–⑲、#323 ⑳–㉒ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
 exit 0
 #endregion

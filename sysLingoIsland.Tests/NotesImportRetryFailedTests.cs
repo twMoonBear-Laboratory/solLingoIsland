@@ -294,18 +294,21 @@ public class NotesImportRetryFailedTests
     {
         Assert.Equal(new[] { "kiwi", "fig" }, NotesImportRunner.ParseFailOnce(" Kiwi , fig,,kiwi "));
         Assert.Empty(NotesImportRunner.ParseFailOnce(null));
-        var lookup = NotesImportRunner.MakeFakeLookup(1, "kiwi");
+        var once = new HashSet<string>(StringComparer.Ordinal);
+        var lookup = NotesImportRunner.MakeFakeLookup(1, "kiwi", once);
         var ex = await Assert.ThrowsAsync<QueryException>(() => lookup("KIWI", CancellationToken.None));
         Assert.Equal(NotesImportRunner.FakeFailReason, ex.Message);
         Assert.StartsWith(NotesImportRunner.FakeTranslationPrefix, (await lookup("kiwi", CancellationToken.None)).Translation);
         Assert.StartsWith(NotesImportRunner.FakeTranslationPrefix, (await NotesImportRunner.MakeFakeLookup(1)("kiwi", CancellationToken.None)).Translation);
+        // 每批各建一個委派：共用集合才是「本行程第一次」（e2e 實撞：每批新委派致重匯又失敗）
+        Assert.StartsWith(NotesImportRunner.FakeTranslationPrefix, (await NotesImportRunner.MakeFakeLookup(1, "kiwi", once)("kiwi", CancellationToken.None)).Translation);
     }
 
     [Fact]
     public void Structure_FailOnceSeam_OnlyWithDelayedFakeLookup()
     {
         var run = Body(Code("sysLingoIsland", "App.xaml.cs"), "RunNotesImport");
-        var m = Regex.Match(run, @"fakeMs is int ms\s*\?\s*NotesImportRunner\.MakeFakeLookup\(ms, Environment\.GetEnvironmentVariable\(NotesImportRunner\.FakeFailOnceEnvVar\)\)\s*:\s*NotesImportRunner\.MakeLookup\(");
+        var m = Regex.Match(run, @"fakeMs is int ms\s*\?\s*NotesImportRunner\.MakeFakeLookup\(ms, Environment\.GetEnvironmentVariable\(NotesImportRunner\.FakeFailOnceEnvVar\), _fakeFailedOnce\)\s*:\s*NotesImportRunner\.MakeLookup\(");
         Assert.True(m.Success, "注入失敗之測試縫須只在延遲假查詢分支生效");
     }
 
@@ -334,7 +337,7 @@ public class NotesImportRetryFailedTests
             var list = @"C:\lists\unit10.txt";
             var words = new[] { "lantern", "orbit", "quartz", "banana", "velvet" };
             var src = new[] { Src(list, words) };
-            var runner = new NotesImportRunner(store, NotesImportRunner.MakeFakeLookup(1, "orbit,quartz,banana"));
+            var runner = new NotesImportRunner(store, NotesImportRunner.MakeFakeLookup(1, "orbit,quartz,banana", new HashSet<string>()));
             var o1 = await runner.RunAsync(words.Select(w => new NotesImportItem(w)).ToList(), folder, null, null, CancellationToken.None);
             Assert.Equal(new[] { "orbit", "quartz", "banana" }, o1.Failed.Select(f => f.Word)); // banana＝已在筆記之更新失敗
             Record(fs, src, o1);
@@ -444,7 +447,7 @@ public class NotesImportRetryFailedTests
             File.WriteAllText(rec, "{\"Version\":1,\"Files\":[]}");
             var fs = new ImportFailureStore(rec);
             using var lockRec = new FileStream(rec, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            var runner = new NotesImportRunner(store, NotesImportRunner.MakeFakeLookup(1, "bb"));
+            var runner = new NotesImportRunner(store, NotesImportRunner.MakeFakeLookup(1, "bb", new HashSet<string>()));
             var o = await runner.RunAsync(new[] { new NotesImportItem("aa"), new NotesImportItem("bb") }, folder, null, null, CancellationToken.None);
             Record(fs, new[] { Src(@"C:\l\x.txt", "aa", "bb") }, o); // 不擲出
             Assert.Equal(1, o.Added);

@@ -131,19 +131,21 @@ public sealed class NotesImportRunner
         => int.TryParse((envValue ?? "").Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var ms) && ms is >= 1 and <= 60000 ? ms : null;
 
     /// <summary>測試縫之延遲假查詢（#322）：等待 <paramref name="delayMs"/> 毫秒（可隨權杖取消）後回「〔測試假查詢〕原字」——不連網、不花額度。</summary>
-    public static Func<string, CancellationToken, Task<QueryResult>> MakeFakeLookup(int delayMs) => MakeFakeLookup(delayMs, null);
+    public static Func<string, CancellationToken, Task<QueryResult>> MakeFakeLookup(int delayMs) => MakeFakeLookup(delayMs, null, new HashSet<string>(StringComparer.Ordinal));
 
     /// <summary>
     /// 測試縫之延遲假查詢＋注入失敗（#323）：<paramref name="failOnce"/>（<see cref="FakeFailOnceEnvVar"/> 之值，逗號分隔、以去重鍵比對）列名之字
-    /// 於本委派（＝本行程）第一次被查時（等待後）擲 <see cref="QueryException"/>，其後同字成功。null／空＝不注入。
+    /// 第一次被查時（等待後）擲 <see cref="QueryException"/>，其後同字成功。「第一次」以 <paramref name="alreadyFailed"/> 記——App 傳入行程層級之集合
+    /// （每批匯入各建一個委派，集合須跨批共用才是「本行程第一次」）。null／空＝不注入。
     /// </summary>
-    public static Func<string, CancellationToken, Task<QueryResult>> MakeFakeLookup(int delayMs, string? failOnce)
+    public static Func<string, CancellationToken, Task<QueryResult>> MakeFakeLookup(int delayMs, string? failOnce, ISet<string> alreadyFailed)
     {
-        var pending = new HashSet<string>(ParseFailOnce(failOnce), StringComparer.Ordinal);
+        var names = new HashSet<string>(ParseFailOnce(failOnce), StringComparer.Ordinal);
         return async (text, ct) =>
         {
             await Task.Delay(delayMs, ct).ConfigureAwait(true);
-            if (pending.Remove(NoteEntry.KeyOf(text))) { throw new QueryException(FakeFailReason); }
+            var key = NoteEntry.KeyOf(text);
+            if (names.Contains(key) && alreadyFailed.Add(key)) { throw new QueryException(FakeFailReason); }
             return new QueryResult(text, "", FakeTranslationPrefix + text);
         };
     }

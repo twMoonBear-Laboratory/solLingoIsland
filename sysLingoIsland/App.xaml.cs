@@ -55,6 +55,7 @@ public partial class App : System.Windows.Application
     private bool ImportRunning => _importCts is not null;
     // ---- #323 只勾上次失敗字（契約「只勾上次失敗字」③⑧）----
     private readonly ImportFailureStore _importFailureStore = new();
+    private readonly HashSet<string> _fakeFailedOnce = new(StringComparer.Ordinal); // #323 測試縫：注入失敗「本行程第一次」之已失敗集合（跨批共用）
     private NotesImportRunner? _importRunner;                        // 背景匯入期間之執行器（結束入口取 Snapshot）
     private IReadOnlyList<ImportFailureSource> _importSources = Array.Empty<ImportFailureSource>(); // 本批來源
     private bool _exitPrompting;                          // 結束確認流程進行中（防系統匣「結束」等再疊一個確認框）
@@ -509,7 +510,7 @@ public partial class App : System.Windows.Application
         // #322 測試縫：LINGOISLAND_IMPORT_FAKE_LOOKUP_MS 為 1–60000 之整數時以延遲假查詢取代線上查詢（端端測試用；零網路、零額度）
         var fakeMs = NotesImportRunner.FakeLookupDelayMs(Environment.GetEnvironmentVariable(NotesImportRunner.FakeLookupEnvVar));
         var lookup = fakeMs is int ms
-            ? NotesImportRunner.MakeFakeLookup(ms, Environment.GetEnvironmentVariable(NotesImportRunner.FakeFailOnceEnvVar)) // #323：注入失敗只隨延遲假查詢生效
+            ? NotesImportRunner.MakeFakeLookup(ms, Environment.GetEnvironmentVariable(NotesImportRunner.FakeFailOnceEnvVar), _fakeFailedOnce) // #323：注入失敗只隨延遲假查詢生效
             : NotesImportRunner.MakeLookup(new QueryService(_config.Model, _config.TimeoutSec, _config.MaxRetries));
         var runner = new NotesImportRunner(_notesStore, lookup);
         _ = RunBackgroundImportAsync(runner, folderId, folderName, words, sources);
