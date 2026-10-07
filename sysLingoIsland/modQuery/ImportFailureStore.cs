@@ -134,7 +134,8 @@ public sealed class ImportFailureStore
         try
         {
             var root = JsonNode.Parse(json) as JsonObject;
-            if (root is null || root["Version"] is not JsonValue vv || !vv.TryGetValue<int>(out var ver) || ver < 1)
+            // 版本以數值判（日後寫成 2.0 或超出 int 亦認得是新版、不覆寫）；非數值或 <1＝損毀
+            if (root is null || root["Version"] is not JsonValue vv || !vv.TryGetValue<double>(out var ver) || double.IsNaN(ver) || ver < 1)
             {
                 return (Array.Empty<ImportFailureRecord>(), ImportFailureReadState.Corrupt);
             }

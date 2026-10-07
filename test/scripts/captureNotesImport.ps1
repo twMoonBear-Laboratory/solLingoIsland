@@ -43,6 +43,7 @@
     ㉑ 再選同檔→預設勾 4 列→鈕「只勾上次失敗字（3）」、三字狀態以「上次匯入失敗；」起首→手勾一列已在筆記→按鈕→恰勾三列、主鈕「查詢並加入 3 字」
        →手冊圖 notes-import-retry-failed.png→實按→結果「已加入 3 字」→紀錄檔已無該路徑。
     ㉒ 再選同檔→鈕停用→取消（零呼叫）。
+    （⑱ 另斷言：unit8 第 2 字 lighthouse 注入失敗，按「是」結束後 import-failures.json 之 unit8 筆恰為 lighthouse——結束入口亦記下。）
   落點被他窗覆蓋即據實中止（不判 PASS）。
 
   查詢並加入之成功／失敗路徑由 NotesImportRunnerTests 以 fake 委派覆蓋（零額度）；本腳本刻意只走到確認頁並取消，不花 OpenAI 額度（USR 常設裁定）。
@@ -104,6 +105,7 @@ Write-Host "# II.參考準備 ================================" -ForegroundColor
   # #323 樣本（7 字、與本腳本其他樣本字不重疊）：首字不在注入名單（免觸發早停）；quill／inkwell／scroll 於本行程第一次假查詢時失敗；atlas 於 ⑳ 不勾（不查、不記）
   $retryWords = @("lantern", "quill", "parchment", "inkwell", "candle", "scroll", "atlas")
   $retryFail  = @("quill", "inkwell", "scroll")
+  $exitFail   = @("lighthouse")   # #323 ⑱：unit8 第 2 字注入失敗——驗「匯入到一半結束程式，已失敗之字一樣記下」
   $unit10Path = Join-Path $sampleDir "unit10-retry.txt"
   $retryPng   = Join-Path $repoRoot "docs\manual-assets\notes-import-retry-failed.png"
   $failLog    = Join-Path $appData "import-failures.json"
@@ -514,7 +516,7 @@ try {
   # #321：受測 app 以明顯無效之假金鑰啟動（子行程繼承本行程環境變數）——金鑰預檢照常通過，萬一誤觸查詢也只得 401、不計費；finally 還原
   $env:OPENAI_API_KEY = "sk-e2e-invalid-placeholder-not-a-real-key-321"
   $env:LINGOISLAND_IMPORT_FAKE_LOOKUP_MS = "1200"   # #322 測試縫：延遲假查詢（零網路、零額度）；finally 還原
-  $env:LINGOISLAND_IMPORT_FAKE_FAIL_ONCE = ($retryFail -join ",")   # #323 測試縫：只對 unit10 之三字於本行程第一次查詢時注入失敗；finally 還原
+  $env:LINGOISLAND_IMPORT_FAKE_FAIL_ONCE = (($retryFail + $exitFail) -join ",")   # #323 測試縫：只對 unit10 之三字於本行程第一次查詢時注入失敗；finally 還原
   $app  = Start-AppAndGetWindow -ExePath $ExePath -TimeoutSec 30
   $hwnd = $app.Hwnd
   Set-WindowMaximized -Hwnd $hwnd | Out-Null
@@ -1136,6 +1138,7 @@ try {
   Write-Host "* ⑱ 按「否」後：行程存活＝$alive／已完成 $dBefore → $dAfter"
   if (-not $alive) { $fails += "⑱：按「否」後程式仍結束了" }
   if ($dAfter -le $dBefore) { $fails += "⑱：按「否」後匯入未續進" }
+  $null = Wait-ProgressDone -AtLeast 3 -TimeoutSec 10   # #323：注入失敗之 lighthouse（第 2 字）已處理完
   [Win32Post]::Close($hwnd) | Out-Null
   $ask = Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "匯入進行中" -ExcludeHwnd $hwnd -TimeoutSec 8
   if ($null -eq $ask) { throw "⑱：第二次關主視窗後未見確認框" }
@@ -1150,6 +1153,11 @@ try {
   if ($k18 -lt 1 -or $k18 -gt 19) { $fails += "⑱：結束後該批字數 $k18 不在 1–19（已加入者應保留、其餘不加入）" }
   elseif ($exited) { Write-Host "* [OK] ⑱ 結束確認：否＝繼續、是＝結束且已加入者保留" -ForegroundColor Green }
   if ((Get-LedgerBytes).Length -ne $ledgerBefore.Length) { $fails += "⑱：AI 花費帳本有變動（輔證）" }
+  # #323：結束入口於取消權杖之前以累積結果更新紀錄——已失敗之 lighthouse 記下、未處理之字不記
+  $logText = if (Test-Path $failLog) { Get-Content $failLog -Raw -Encoding UTF8 } else { "" }
+  $f18 = if ($logText) { @(($logText | ConvertFrom-Json).Files) | Where-Object { $_.Path -eq (Resolve-Path $unit8Path).Path } | Select-Object -First 1 } else { $null }
+  Write-Host "* ⑱ 結束後紀錄（unit8）＝$(if ($null -ne $f18) { @($f18.Words) -join ',' } else { '（無）' })"
+  if ($null -eq $f18 -or ((@($f18.Words) -join ",") -ne ($exitFail -join ","))) { $fails += "⑱：結束 app 後紀錄未恰記下已失敗之 lighthouse（#323）" }
   #endregion
 
 }

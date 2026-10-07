@@ -237,13 +237,15 @@ public class NotesImportRetryFailedTests
         finally { File.Delete(path); }
     }
 
-    [Fact]
-    public void Store_NewerVersion_IsNotOverwritten()
+    [Theory]
+    [InlineData("{\"Version\":2,\"Files\":[],\"Extra\":true}")]
+    [InlineData("{\"Version\":2.0,\"Files\":[]}")]
+    [InlineData("{\"Version\":99999999999,\"Files\":[]}")]
+    public void Store_NewerVersion_IsNotOverwritten(string newer)
     {
         var path = TempPath();
         try
         {
-            const string newer = "{\"Version\":2,\"Files\":[],\"Extra\":true}";
             File.WriteAllText(path, newer);
             var store = new ImportFailureStore(path);
             Assert.Equal(ImportFailureReadState.Newer, store.Read().State);
@@ -446,13 +448,18 @@ public class NotesImportRetryFailedTests
             var (store, folder) = Seed(notes);
             File.WriteAllText(rec, "{\"Version\":1,\"Files\":[]}");
             var fs = new ImportFailureStore(rec);
-            using var lockRec = new FileStream(rec, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            var runner = new NotesImportRunner(store, NotesImportRunner.MakeFakeLookup(1, "bb", new HashSet<string>()));
-            var o = await runner.RunAsync(new[] { new NotesImportItem("aa"), new NotesImportItem("bb") }, folder, null, null, CancellationToken.None);
-            Record(fs, new[] { Src(@"C:\l\x.txt", "aa", "bb") }, o); // 不擲出
-            Assert.Equal(1, o.Added);
+            NotesImportOutcome o;
+            using (new FileStream(rec, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var runner = new NotesImportRunner(store, NotesImportRunner.MakeFakeLookup(1, "bb", new HashSet<string>()));
+                o = await runner.RunAsync(new[] { new NotesImportItem("aa"), new NotesImportItem("bb") }, folder, null, null, CancellationToken.None);
+                Assert.Empty(fs.FailedKeysFor(new[] { @"C:\l\x.txt" }));                      // 讀不到＝按鈕停用
+                Assert.False(fs.Update(new[] { Src(@"C:\l\x.txt", "aa", "bb") }, o.AddedWords, o.Failed.Select(f => f.Word), DateTimeOffset.UtcNow)); // 不擲出、不寫
+            }
+            Assert.Equal(1, o.Added);                                                            // 匯入結果不受紀錄檔影響
             Assert.Single(o.Failed);
             Assert.Equal(1, store.LoadEnsured().Folders[0].Entries.Count(e => e.Original == "aa"));
+            Assert.Equal("{\"Version\":1,\"Files\":[]}", File.ReadAllText(rec));             // 鎖住期間未被改寫
         }
         finally { File.Delete(notes); File.Delete(rec); }
     }
@@ -488,9 +495,10 @@ public class NotesImportRetryFailedTests
         Assert.Contains("ImportConfirmed?.Invoke(folder.Id, folderPath, win.SelectedItems, NotesImport.FailureSources(load.Sources))", page);
         Assert.Contains("NotesImport.MarkPreviouslyFailed(scan.Entries, FailureStore.FailedKeysFor(", page);
         var xaml = ReadRepoFile("sysLingoIsland", "modPresent", "NotesImportWindow.xaml");
-        var btn = Regex.Match(xaml, "<Button x:Name=\"SelectFailedBtn\"[^>]*/>", RegexOptions.Singleline).Value;
+        var btn = Regex.Match(xaml, "<Button x:Name=\"SelectFailedBtn\".*?</Button>", RegexOptions.Singleline).Value;
         Assert.Contains("AutomationProperties.AutomationId=\"NotesImportSelectFailed\"", btn);
         Assert.Contains("ToolTipService.ShowOnDisabled=\"True\"", btn);
+        Assert.Matches(new Regex("<Trigger Property=\"IsEnabled\" Value=\"False\">\\s*<Setter Property=\"Opacity\""), btn); // 停用外觀（GhostButton 樣板無）
         Assert.True(xaml.IndexOf("NotesImportSelectNone", StringComparison.Ordinal) < xaml.IndexOf("NotesImportSelectFailed", StringComparison.Ordinal));
         var win = Code("sysLingoIsland", "modPresent", "NotesImportWindow.xaml.cs");
         Assert.Contains("r.Box.IsChecked = r.Entry.PreviouslyFailed && r.Entry.IsSelectable", win); // 恰勾 N 列、其餘不勾
