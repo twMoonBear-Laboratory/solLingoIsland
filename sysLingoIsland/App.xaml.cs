@@ -443,7 +443,7 @@ public partial class App : System.Windows.Application
         if (outcome is not null && (outcome.Added > 0 || outcome.Updated > 0))
         {
             var shownFolder = outcome.TargetFolderMissing ? outcome.FallbackFolder : folderName;
-            ToastNotifier.Show($"✓ 已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "")
+            ToastNotifier.Show("✓ " + (outcome.Added > 0 ? $"已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") : $"已更新 {outcome.Updated} 字")
                                + (outcome.Failed.Count > 0 ? $"（{outcome.Failed.Count} 字失敗）" : ""));
         }
     }
