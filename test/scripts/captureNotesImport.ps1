@@ -44,6 +44,12 @@
        →手冊圖 notes-import-retry-failed.png→實按→結果「已加入 3 字」→紀錄檔已無該路徑。
     ㉒ 再選同檔→鈕停用→取消（零呼叫）。
     （⑱ 另斷言：unit8 第 2 字 lighthouse 注入失敗，按「是」結束後 import-failures.json 之 unit8 筆恰為 lighthouse——結束入口亦記下。）
+  #324（匯入後一鍵整批撤銷，spec#14 擴充）增走（㉓㉔ 接在 ㉒ 之後、⑱ 之前；notes.json 一律以原始 JSON 文字改寫、原子替換）：
+    ㉓ 植入已在筆記之 willow（原中譯可辨識）→unit11-undo.txt（ember／glimmer／radiance／willow）手勾 willow→實按「查詢並加入 4 字」→結果「已加入 3 字…更新 1 字」、
+       撤銷鈕可按與說明→腳本改 glimmer 底色（模擬匯入後修改）→撤銷→確認框（移除 2、還原 1、glimmer 保持現狀）→「是」→標頭「已撤銷本次匯入」、摘要與跳過清單、
+       鈕「已撤銷」停用→手冊圖 notes-import-undo.png→notes.json：ember／radiance 不在、glimmer 底色保留、willow 中譯音標回到原值；筆記分頁條目區不見已撤之字。
+    ㉔ unit13（3 字）完成、不關結果視窗→unit12（20 字）背景執行中：舊視窗撤銷鈕停用且說明「已開始新的匯入…」、「上次匯入結果」停用→取消→關結果視窗→
+       「上次匯入結果」再開→撤銷→「是」→unit12 已加入之字全數不在、unit13 三字仍在。
   落點被他窗覆蓋即據實中止（不判 PASS）。
 
   查詢並加入之成功／失敗路徑由 NotesImportRunnerTests 以 fake 委派覆蓋（零額度）；本腳本刻意只走到確認頁並取消，不花 OpenAI 額度（USR 常設裁定）。
@@ -109,6 +115,17 @@ Write-Host "# II.參考準備 ================================" -ForegroundColor
   $unit10Path = Join-Path $sampleDir "unit10-retry.txt"
   $retryPng   = Join-Path $repoRoot "docs\manual-assets\notes-import-retry-failed.png"
   $failLog    = Join-Path $appData "import-failures.json"
+  # #324 樣本（與本腳本其他樣本字不重疊）：㉓ 3 新字＋已在筆記之 willow（㉓ 起手以原始 JSON 植入、帶可辨識之原中譯）；㉔ unit13 3 字、unit12 20 字
+  $undoWords       = @("ember", "glimmer", "radiance", "willow")
+  $willowId        = "zzzz324324324324324324324324324f"
+  $willowOrig      = "〔撤銷前原中譯〕柳樹"
+  $smallWords      = @("pebble", "boulder", "gravel")
+  $undoCancelWords = @("quasar", "pulsar", "nova", "zenith", "nadir", "solstice", "equinox", "parallax", "perigee", "apogee",
+                       "umbra", "penumbra", "corona", "photon", "neutrino", "plasma", "vortex", "cosmos", "stellar", "orbitals")
+  $unit11Path = Join-Path $sampleDir "unit11-undo.txt"
+  $unit12Path = Join-Path $sampleDir "unit12-undo-cancel.txt"
+  $unit13Path = Join-Path $sampleDir "unit13-undo-small.txt"
+  $undoPng    = Join-Path $repoRoot "docs\manual-assets\notes-import-undo.png"
   $origFailOnce = $env:LINGOISLAND_IMPORT_FAKE_FAIL_ONCE
   $bgPng     = Join-Path $repoRoot "docs\manual-assets\notes-import-background.png"
   $origFakeMs = $env:LINGOISLAND_IMPORT_FAKE_LOOKUP_MS
@@ -481,6 +498,7 @@ try {
   Remove-WordsEverywhere $data.Folders $sampleOwnWords   # #321：樣本字不得預先存在（APPDATA 已備份、finally 還原）
   Remove-WordsEverywhere $data.Folders ($bgWords + $cancelWords + $exitWords + $minWords)   # #322 樣本字同理
   Remove-WordsEverywhere $data.Folders $retryWords   # #323 樣本字同理
+  Remove-WordsEverywhere $data.Folders ($undoWords + $smallWords + $undoCancelWords)   # #324 樣本字同理
   if (Test-Path $failLog) { Remove-Item $failLog -Force }   # #323：自無紀錄起手（APPDATA 已備份、finally 還原）
   $mkEntry = { param($w) [pscustomobject]@{ Id = ([guid]::NewGuid().ToString("N")); AddedAt = "2026-10-06T00:00:00.0000000+08:00"; Original = $w; Phonetic = "[$w]"; Translation = "譯:$w"; Color = ""; PracticeScore = -1 } }
   $data.Folders = @($data.Folders) + ([pscustomobject]@{
@@ -1116,6 +1134,132 @@ try {
   if (@($fails | Where-Object { $_ -match "^[⑳㉑㉒]" }).Count -eq 0) { Write-Host "* [OK] ⑳–㉒ 只勾上次失敗字：記下、按鈕只勾失敗字、成功後清除" -ForegroundColor Green }
   #endregion
 
+  #region P4.#324 ㉓㉔ 匯入後一鍵整批撤銷 --------------------------------
+  Write-Host "## P4.#324 ㉓㉔ 整批撤銷 --------------------------------" -ForegroundColor Cyan
+  # 以原始 JSON 文字改 notes.json（不經 ConvertFrom-Json——PS7 會把 AddedAt 轉成 DateTime 再寫回、改變字面，撤銷即判「已修改」）；原子替換
+  function Edit-NotesRaw {
+    param([scriptblock]$Fn)
+    $t = [System.IO.File]::ReadAllText($notesJson)
+    $n = & $Fn $t
+    if ($n -eq $t) { throw "Edit-NotesRaw：內容未變（錨點不符）" }
+    $tmp = $notesJson + ".e2e.tmp"
+    [System.IO.File]::WriteAllText($tmp, $n, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -Path $tmp -Destination $notesJson -Force
+  }
+  function Get-EntryOf {
+    param([string]$Word)
+    $j = Get-Content $notesJson -Raw -Encoding UTF8 | ConvertFrom-Json
+    return @(Get-AllFolders $j.Folders | ForEach-Object { @($_.Entries) } | Where-Object { $_.Original -eq $Word }) | Select-Object -First 1
+  }
+  function Wait-ResultTitled {
+    param([string]$TitleLike, [int]$TimeoutSec = 30)
+    return Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike $TitleLike -ExcludeHwnd $hwnd -TimeoutSec $TimeoutSec
+  }
+  function Wait-UndoAsk { return Wait-WindowByTitle -MainRoot $root -ProcessId $app.ProcessId -TitleLike "撤銷本次匯入" -ExcludeHwnd $hwnd -TimeoutSec 8 }
+  function Get-AskText { param($Ask) return (@($Ask.FindAll($TS::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) -join " ") }
+
+  # ㉓ 新增 3 字＋更新 1 字（已在筆記之 willow）→匯入後改 glimmer 底色→撤銷：移除 2、還原 1、跳過 1
+  [System.IO.File]::WriteAllText($unit11Path, ($undoWords -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+  $willowJson = '{ "Id": "' + $willowId + '", "AddedAt": "2026-10-06T00:00:00+08:00", "Original": "willow", "Phonetic": "[willow]", "Translation": "' + $willowOrig + '", "Color": "", "PracticeScore": -1 },'
+  Edit-NotesRaw { param($t) [regex]::new('("Id":\s*"' + $probeId + '"[\s\S]*?"Entries":\s*\[)').Replace($t, ('$1' + $willowJson), 1) }
+  $c23 = Start-BackgroundImport -Path $unit11Path -N 0 -Tag "㉓" -OpenOnly
+  $willowBox = @($c23.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::CheckBox))) | Where-Object { $_.Current.Name -eq "willow" }) | Select-Object -First 1
+  if ($null -eq $willowBox) { Close-Confirm $c23; throw "㉓：確認頁找不到 willow 列（植入未生效）" }
+  $willowBox.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle(); Start-Sleep -Milliseconds 300
+  $b23 = Find-ByAutomationId -Root $c23 -Id "NotesImportConfirm"
+  if ($b23.Current.Name -ne "查詢並加入 4 字") { Close-Confirm $c23; throw "㉓：勾 willow 後主鈕「$($b23.Current.Name)」≠「查詢並加入 4 字」——不實按，據實中止" }
+  Invoke-El $b23; Write-Host "* ㉓：已實按「查詢並加入 4 字」"
+  $res23 = Wait-ResultTitled "匯入清單：完成" 30
+  if ($null -eq $res23) { throw "㉓：30 秒內未見結果視窗" }
+  $rr = Read-ResultWindow $res23
+  Write-Host "* ㉓ 結果：「$($rr.Body)」"
+  if ($rr.Body -notlike "匯入完成：已加入 3 字*更新 1 字*") { $fails += "㉓：結果非「已加入 3 字…更新 1 字」" }
+  $undo = Find-ByAutomationId -Root $res23 -Id "NotesImportResultUndo"
+  $hint = Find-ByAutomationId -Root $res23 -Id "NotesImportResultUndoHint"
+  if ($null -eq $undo) { throw "㉓：結果視窗找不到「撤銷本次匯入」（NotesImportResultUndo）——#324 未落地" }
+  Write-Host "* ㉓ 撤銷鈕＝「$($undo.Current.Name)」啟用＝$($undo.Current.IsEnabled)／說明＝「$(if ($hint) { $hint.Current.Name })」"
+  if (-not $undo.Current.IsEnabled -or $undo.Current.Name -ne "撤銷本次匯入") { $fails += "㉓：撤銷鈕未啟用或文字不符" }
+  if ($null -eq $hint -or $hint.Current.Name -notlike "*上次匯入結果*") { $fails += "㉓：撤銷說明列取不到或不符" }
+  # 模擬匯入後使用者以右鍵改 glimmer 底色
+  Edit-NotesRaw { param($t) [regex]::new('("Original":\s*"glimmer",\s*"Phonetic":\s*"[^"]*",\s*"Translation":\s*"[^"]*",\s*"Color":\s*)"[^"]*"').Replace($t, '$1"#ABCDEF"', 1) }
+  Invoke-El $undo
+  $ask = Wait-UndoAsk
+  if ($null -eq $ask) { throw "㉓：按撤銷後未見確認框（Title 撤銷本次匯入）" }
+  $askText = Get-AskText $ask
+  Write-Host "* ㉓ 確認框＝「$askText」"
+  foreach ($must in @("移除這次新增的 2 字", "把這次更新的 1 字還原為匯入前的音標與中譯", "1 字在匯入後已修改、移動或刪除，保持現狀不動：glimmer", "撤銷後無法再復原")) {
+    if ($askText -notlike "*$must*") { $fails += "㉓：確認框未含「$must」" }
+  }
+  $yes = Find-AskButton $ask @("是", "Yes")
+  if ($null -eq $yes) { throw "㉓：確認框找不到「是」" }
+  Press-AskButton $ask $yes "㉓"; Start-Sleep -Milliseconds 1200
+  $rr = Read-ResultWindow $res23
+  Write-Host "* ㉓ 撤銷後：Title＝「$($rr.Title)」標頭＝「$($rr.Header)」內文首段＝「$(($rr.Body -split "`n")[0])」"
+  if ($rr.Title -ne "匯入清單：已撤銷" -or $rr.Header -ne "已撤銷本次匯入") { $fails += "㉓：撤銷後 Title／標頭不符" }
+  if (-not $rr.Body.StartsWith("已撤銷本次匯入：移除 2 字、還原 1 字、跳過 1 字。")) { $fails += "㉓：撤銷摘要首句不符" }
+  if ($rr.Body -notlike "*glimmer——匯入後已修改*" -or $rr.Body -notlike "*——以下為原本的匯入結果——*匯入完成：已加入 3 字*") { $fails += "㉓：跳過清單或原結果不符" }
+  $undo = Find-ByAutomationId -Root $res23 -Id "NotesImportResultUndo"
+  if ($undo.Current.IsEnabled -or $undo.Current.Name -ne "已撤銷") { $fails += "㉓：撤銷後鈕未改「已撤銷」並停用" }
+  Save-WindowShot -Hwnd ([IntPtr]$res23.Current.NativeWindowHandle) -Path (Join-Path $OutDir "13-undo.png")
+  Copy-Item (Join-Path $OutDir "13-undo.png") $undoPng -Force
+  Write-Host "* 手冊圖已產出（整批撤銷）：$undoPng"
+  $ember = Get-EntryOf "ember"; $radiance = Get-EntryOf "radiance"; $glimmer = Get-EntryOf "glimmer"; $willow = Get-EntryOf "willow"
+  Write-Host "* ㉓ notes.json：ember＝$([bool]$ember)／radiance＝$([bool]$radiance)／glimmer 底色＝$($glimmer.Color)／willow＝$($willow.Phonetic) $($willow.Translation)"
+  if ($ember -or $radiance) { $fails += "㉓：撤銷後新增之字仍在" }
+  if ($null -eq $glimmer -or $glimmer.Color -ne "#ABCDEF") { $fails += "㉓：匯入後改過之 glimmer 未保持現狀" }
+  if ($null -eq $willow -or $willow.Translation -ne $willowOrig -or $willow.Phonetic -ne "[willow]") { $fails += "㉓：willow 未還原為匯入前" }
+  Start-Sleep -Milliseconds 2500   # 條目區重繪節流 2 秒
+  $panelTexts = @((Find-ByAutomationId -Root $root -Id "EntryScroll").FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Text))) | ForEach-Object { $_.Current.Name })
+  if ($panelTexts -contains "ember" -or $panelTexts -contains "radiance") { $fails += "㉓：筆記分頁未隨撤銷同步（仍見已撤之字）" }
+  Close-ResultWindow $res23
+  if (@($fails | Where-Object { $_ -match "^㉓" }).Count -eq 0) { Write-Host "* [OK] ㉓ 撤銷：移除 2、還原 1、改過者跳過並列出、筆記頁同步" -ForegroundColor Green }
+
+  # ㉔ 上一批失效、取消後撤銷、關窗後由「上次匯入結果」再開
+  [System.IO.File]::WriteAllText($unit13Path, ($smallWords -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+  [System.IO.File]::WriteAllText($unit12Path, ($undoCancelWords -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+  Start-BackgroundImport -Path $unit13Path -N 3 -Tag "㉔a"
+  $res13 = Wait-ResultTitled "匯入清單：完成" 30
+  if ($null -eq $res13) { throw "㉔：unit13 未見結果視窗" }
+  Start-BackgroundImport -Path $unit12Path -N 20 -Tag "㉔b"
+  $null = Wait-ProgressDone -AtLeast 1 -TimeoutSec 10
+  $u13 = Find-ByAutomationId -Root $res13 -Id "NotesImportResultUndo"
+  $h13 = Find-ByAutomationId -Root $res13 -Id "NotesImportResultUndoHint"
+  $lr = Find-ByAutomationId -Root $root -Id "NotesImportLastResultBtn"
+  Write-Host "* ㉔ 新一批進行中：舊窗撤銷鈕啟用＝$($u13.Current.IsEnabled)／說明＝「$($h13.Current.Name)」／上次匯入結果鈕啟用＝$($lr.Current.IsEnabled)"
+  if ($u13.Current.IsEnabled) { $fails += "㉔：新一批開始後舊結果視窗之撤銷鈕仍可按" }
+  if ($h13.Current.Name -ne "已開始新的匯入——只能撤銷最近一次匯入") { $fails += "㉔：舊結果視窗說明不符" }
+  if ($null -eq $lr -or $lr.Current.IsEnabled) { $fails += "㉔：背景匯入進行中「上次匯入結果」未停用" }
+  $null = Wait-ProgressDone -AtLeast 3 -TimeoutSec 20
+  Invoke-El (Find-ByAutomationId -Root $root -Id "NotesImportProgressCancel")
+  $res12 = Wait-ResultTitled "匯入清單：已取消" 20
+  if ($null -eq $res12) { throw "㉔：取消後未見結果視窗" }
+  $k12 = Count-Words $undoCancelWords
+  Write-Host "* ㉔ 取消後 unit12 已加入 $k12 字"
+  if ($k12 -lt 3 -or $k12 -gt 19) { $fails += "㉔：取消後已加入字數 $k12 不在 3–19" }
+  Close-ResultWindow $res12
+  $lr = Find-ByAutomationId -Root $root -Id "NotesImportLastResultBtn"
+  if ($null -eq $lr -or -not $lr.Current.IsEnabled) { throw "㉔：關掉結果視窗後「上次匯入結果」不可按" }
+  Invoke-El $lr
+  $re12 = Wait-ResultTitled "匯入清單：已取消" 8
+  if ($null -eq $re12) { throw "㉔：按「上次匯入結果」後未再開結果視窗" }
+  $u12 = Find-ByAutomationId -Root $re12 -Id "NotesImportResultUndo"
+  if (-not $u12.Current.IsEnabled) { $fails += "㉔：再開之結果視窗撤銷鈕不可按" }
+  Invoke-El $u12
+  $ask = Wait-UndoAsk
+  if ($null -eq $ask) { throw "㉔：按撤銷後未見確認框" }
+  $askText = Get-AskText $ask
+  if ($askText -notlike "*移除這次新增的 $k12 字*") { $fails += "㉔：確認框筆數非 $k12（實得「$askText」）" }
+  $yes = Find-AskButton $ask @("是", "Yes")
+  Press-AskButton $ask $yes "㉔"; Start-Sleep -Milliseconds 1200
+  $after12 = Count-Words $undoCancelWords; $after13 = Count-Words $smallWords
+  Write-Host "* ㉔ 撤銷後：unit12 剩 $after12 字／unit13 剩 $after13 字"
+  if ($after12 -ne 0) { $fails += "㉔：取消後之部分匯入撤銷後仍剩 $after12 字" }
+  if ($after13 -ne 3) { $fails += "㉔：上一批（已失效）之字被動到（剩 $after13）" }
+  Close-ResultWindow $re12
+  if ((Get-LedgerBytes).Length -ne $ledgerBefore.Length) { $fails += "㉓㉔：AI 花費帳本有變動（輔證）" }
+  if (@($fails | Where-Object { $_ -match "^㉔" }).Count -eq 0) { Write-Host "* [OK] ㉔ 上一批失效、取消後撤銷、關窗後再開" -ForegroundColor Green }
+  #endregion
+
   #region Q.#322 ⑱ 匯入中結束 app：確認框、否＝繼續、是＝結束且已加入者保留 --------------------------------
   Write-Host "## Q.#322 ⑱ 結束確認 --------------------------------" -ForegroundColor Cyan
   Start-BackgroundImport -Path $unit8Path -N 20 -Tag "⑱"
@@ -1188,6 +1332,6 @@ if ($fails.Count -gt 0) {
   $fails | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
   exit 1
 }
-Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪、#321 ⑫–⑭、#322 ⑮–⑲、#323 ⑳–㉒ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
+Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪、#321 ⑫–⑭、#322 ⑮–⑲、#323 ⑳–㉒、#324 ㉓㉔ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
 exit 0
 #endregion
