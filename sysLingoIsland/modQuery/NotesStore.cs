@@ -57,6 +57,14 @@ public sealed class NotesFileCorruptException : IOException
         : base("筆記檔內容已損毀、無法讀取——請到「選項」分頁「資料備份與搬遷」以「匯入資料…」還原備份", inner) { }
 }
 
+/// <summary>筆記存檔失敗（#324：以型別區分「讀不到」與「存不進去」，不以訊息字串分流）；訊息沿用「筆記存檔失敗：原因」，<see cref="Reason"/> 為原因。</summary>
+public sealed class NotesSaveFailedException : IOException
+{
+    public NotesSaveFailedException(string reason) : base("筆記存檔失敗：" + reason) => Reason = reason;
+
+    public string Reason { get; }
+}
+
 /// <summary>
 /// 我的筆記本機儲存（[modQuery模組] 我的筆記儲存契約，spec#7；Issue #34 樹化）。存
 /// <c>%APPDATA%\LingoIsland\notes.json</c>。資料夾為**多層樹**（向後相容舊平面）；加入以英文原文正規化
@@ -200,7 +208,7 @@ public sealed class NotesStore
         if (Contains(d, entry.Key)) { return NoteAddResult.AlreadyExists; }
         var idx = batchKeys is null ? Math.Clamp(insertAt ?? 0, 0, folder.Entries.Count) : BatchInsertIndex(folder, batchKeys);
         folder.Entries.Insert(idx, entry);
-        if (!TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+        if (!TrySave(d, out var err)) { throw new NotesSaveFailedException(err); }
         onWritten?.Invoke(new NoteWriteRecord(null, entry, folder.Id)); // #324：存檔成功後才回報
         return NoteAddResult.Added;
     }
@@ -213,7 +221,7 @@ public sealed class NotesStore
     {
         var d = LoadStrict();
         var plan = NoteImportUndo.Apply(d, journal);
-        if (plan.HasChange && !TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+        if (plan.HasChange && !TrySave(d, out var err)) { throw new NotesSaveFailedException(err); }
         return plan;
     }
 
@@ -281,7 +289,7 @@ public sealed class NotesStore
             {
                 var before = f.Entries[i];
                 f.Entries[i] = before with { Phonetic = r.Phonetic, Translation = r.Translation };
-                if (!TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+                if (!TrySave(d, out var err)) { throw new NotesSaveFailedException(err); }
                 onWritten?.Invoke(new NoteWriteRecord(before, f.Entries[i], f.Id)); // #324：覆寫前全貌即在此保存
                 return true;
             }
@@ -319,7 +327,7 @@ public sealed class NotesStore
             written.Add(new NoteWriteRecord(null, entry, folder.Id));
             outcome.Add(OwnTranslationWriteResult.Added);
         }
-        if (outcome.Any(o => o != OwnTranslationWriteResult.Empty) && !TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
+        if (outcome.Any(o => o != OwnTranslationWriteResult.Empty) && !TrySave(d, out var err)) { throw new NotesSaveFailedException(err); }
         if (onWritten is not null) { foreach (var w in written) { onWritten(w); } }
         return outcome;
     }

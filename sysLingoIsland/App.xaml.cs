@@ -549,8 +549,11 @@ public partial class App : System.Windows.Application
             _importSources = Array.Empty<ImportFailureSource>();
         }
         RecordImportFailures(sources, outcome); // #323：先於結果呈現之一切分支（含結束中、最小化延後）
-        SetLastImport(outcome, folderName);     // #324 ③：同處、先於結果呈現之一切分支
-        try { FinishBackgroundImport(outcome, folderName); }
+        try
+        {
+            SetLastImport(outcome, folderName); // #324 ③：同處、先於結果呈現之一切分支（收尾例外防護內）
+            FinishBackgroundImport(outcome, folderName);
+        }
         catch (Exception ex)
         {
             try { File.WriteAllText(LogPath, DateTime.Now + "\n" + ex); } catch { /* log 寫入失敗不致命 */ }
@@ -656,7 +659,7 @@ public partial class App : System.Windows.Application
     /// <summary>筆記頁 [上次匯入結果]（#324 ③）：已開著同一份即帶到前景，否則再開。</summary>
     private void ShowLastImportResult()
     {
-        if (_lastImport is not { } m || ImportRunning) { return; }
+        if (_lastImport is not { } m || ImportRunning || _undoPrompting) { return; } // #324 ⑦：撤銷對話框開著時不關其 owner
         if (_importResultWindow is { } w && ReferenceEquals(w.Model, m))
         {
             if (w.WindowState == WindowState.Minimized) { w.WindowState = WindowState.Normal; }
@@ -672,8 +675,20 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void UndoLastImport(NotesImportResultWindow owner)
     {
+        if (!owner.Model.CanUndo || _undoPrompting) { return; }
+        // ⑦：撤銷流程之一切對話框（確認與各提示）皆以結果視窗為 owner——開著期間不關它：新一批收尾之結果視窗延後、[上次匯入結果] 不受理
+        _undoPrompting = true;
+        try { UndoLastImportCore(owner); }
+        finally
+        {
+            _undoPrompting = false;
+            ShowPendingImportResult(); // 期間延後之新結果於此補開
+        }
+    }
+
+    private void UndoLastImportCore(NotesImportResultWindow owner)
+    {
         var m = owner.Model;
-        if (!m.CanUndo || _undoPrompting) { return; }
         if (_optionsPage?.RestoreRunning == true) { UndoInfo(owner, NotesImportUndoText.RestoreBusyText); return; }
         if (ImportRunning) { UndoInfo(owner, NotesImportUndoText.ImportBusyText); return; }
         NoteUndoPlan trial;
@@ -685,26 +700,19 @@ public partial class App : System.Windows.Application
             UndoInfo(owner, NotesImportUndoText.NothingText(m.EntryCount));
             return;
         }
-        MessageBoxResult answer;
-        _undoPrompting = true;
-        try
-        {
-            answer = System.Windows.MessageBox.Show(owner, NotesImportUndoText.ConfirmText(trial), NotesImportUndoText.DialogTitle,
-                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
-        }
-        finally { _undoPrompting = false; }
-        if (answer != MessageBoxResult.Yes) { ShowPendingImportResult(); return; }
+        var answer = System.Windows.MessageBox.Show(owner, NotesImportUndoText.ConfirmText(trial), NotesImportUndoText.DialogTitle,
+            MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) { return; }
         // ⑦：確認框只鎖結果視窗——開著期間可能已開始新一批或還原備份，先重查
         if (!ReferenceEquals(_lastImport, m) || !m.CanUndo || ImportRunning || _optionsPage?.RestoreRunning == true)
         {
             UndoInfo(owner, NotesImportUndoText.RecheckFailedText);
-            ShowPendingImportResult();
             return;
         }
         NoteUndoPlan plan;
         try { plan = _notesStore.UndoImportAndSave(m.Journal); }
-        catch (NotesFileCorruptException ex) { UndoInfo(owner, ex.Message); return; }
-        catch (IOException ex) { UndoInfo(owner, ex.Message.StartsWith("筆記存檔失敗：", StringComparison.Ordinal) ? NotesImportUndoText.SaveFailedText(ex.Message["筆記存檔失敗：".Length..]) : NotesImportUndoText.ReadLockedText); return; }
+        catch (NotesSaveFailedException ex) { UndoInfo(owner, NotesImportUndoText.SaveFailedText(ex.Reason)); return; }
+        catch (IOException ex) { UndoInfo(owner, UndoReadErrorText(ex)); return; }
         if (!plan.HasChange)
         {
             m.MarkNothingToUndo();

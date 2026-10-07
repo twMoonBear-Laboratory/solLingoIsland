@@ -127,9 +127,9 @@ public class NotesImportUndoTests
     }
 
     [Fact]
-    public void SameIdTwice_AddedThenRefreshed_MergedAsOneAddedEntry()
+    public void SameIdTwice_EditedBetweenWrites_MergedAndKept()
     {
-        // 背景匯入期間本批新增之 X 被「編輯重譯」改成本批後面之字 Y，執行器輪到 Y 時刷新同一筆
+        // 背景匯入期間本批新增之 X 被「編輯重譯」改成本批後面之字 Y，執行器輪到 Y 時刷新同一筆——兩次寫入之間使用者改過，撤銷不得蓋掉
         var (d, a, _) = Data();
         var x = E("lantern", "燈籠");
         var edited = x with { Original = "orbit", Translation = "軌道（手改）", PracticeScore = -1 };
@@ -139,9 +139,45 @@ public class NotesImportUndoTests
         var merged = Assert.Single(NoteImportUndo.Merge(journal));
         Assert.True(merged.IsAdded);
         var plan = NoteImportUndo.Apply(d, journal);
-        Assert.Single(plan.Items);
-        Assert.Equal(1, plan.Removed);
-        Assert.Empty(a.Entries);
+        Assert.Equal(NoteImportUndo.ReasonModified, Assert.Single(plan.Items).Reason);
+        Assert.Equal(new[] { refreshed }, a.Entries);
+    }
+
+    [Fact]
+    public void SameIdTwice_RefreshRefreshWithOriginalChanged_IsKept_NoCrossWordRestore()
+    {
+        // apple 刷新→使用者把它編輯重譯成 banana→執行器刷新 banana（同一 Id）：不得把 apple 之音標中譯套到 banana 上
+        var (d, a, _) = Data();
+        var apple0 = E("apple", "蘋果", "/ˈæpəl/");
+        var apple1 = apple0 with { Translation = "〔新〕蘋果" };
+        var banana0 = apple1 with { Original = "banana", Translation = "香蕉（手改）", Phonetic = "" };
+        var banana1 = banana0 with { Translation = "〔新〕香蕉" };
+        a.Entries.Add(banana1);
+        var plan = NoteImportUndo.Apply(d, new[] { Updated(apple0, apple1, a), Updated(banana0, banana1, a) });
+        Assert.Equal(NoteImportUndo.ReasonModified, Assert.Single(plan.Items).Reason);
+        Assert.Equal(banana1, a.Entries[0]);
+    }
+
+    [Fact]
+    public void SameIdTwice_ChainIntact_RestoresToEarliestBefore()
+    {
+        var (d, a, _) = Data();
+        var v0 = E("apple", "蘋果"); var v1 = v0 with { Translation = "一" }; var v2 = v1 with { Translation = "二" };
+        a.Entries.Add(v2);
+        var plan = NoteImportUndo.Apply(d, new[] { Updated(v0, v1, a), Updated(v1, v2, a) });
+        Assert.Equal(1, plan.Restored);
+        Assert.Equal("蘋果", a.Entries[0].Translation);
+    }
+
+    [Fact]
+    public void Updated_SameContentAsBefore_IsNoOp_NotCounted()
+    {
+        var (d, a, _) = Data();
+        var before = E("apple", "蘋果"); var after = before; // AI 回之內容與原本相同
+        a.Entries.Add(after);
+        var plan = NoteImportUndo.Apply(d, new[] { Updated(before, after, a) });
+        Assert.Empty(plan.Items);
+        Assert.False(plan.HasChange);
     }
 
     [Fact]
@@ -309,21 +345,36 @@ public class NotesImportUndoTests
     }
 
     [Fact]
-    public async Task Integration_WriteFailure_NotJournaled()
+    public async Task Integration_SaveFailure_NotJournaled_UndoSaveFailureLeavesFileUnchanged()
     {
+        // 讀得到、存不進去：以同名目錄佔住原子寫入之暫存檔路徑（notes.json.tmp）——LoadStrict 照常成功、TrySave 失敗
         var path = TempPath();
+        var tmp = path + ".tmp";
         try
         {
-            var (store, folder) = Seed(path);
-            NotesImportOutcome o;
-            using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-            {
-                o = await new NotesImportRunner(store, NotesImportRunner.MakeFakeLookup(1)).RunAsync(new[] { "aa" }, folder, null, null, CancellationToken.None);
-            }
-            Assert.Single(o.Failed);
-            Assert.Empty(o.Journal);
+            var (store, folder) = Seed(path, ("keep", "留"));
+            Directory.CreateDirectory(tmp);
+            var o1 = await new NotesImportRunner(store, NotesImportRunner.MakeFakeLookup(1)).RunAsync(
+                new[] { new NotesImportItem("aa"), new NotesImportItem("keep"), new NotesImportItem("own", "自備") }, folder, null, null, CancellationToken.None);
+            Assert.Equal(3, o1.Failed.Count);           // 線上新增、線上刷新、自備段皆存檔失敗
+            Assert.Empty(o1.Journal);                   // 存檔失敗擲出者不記日誌
+            Directory.Delete(tmp);
+
+            var o2 = await new NotesImportRunner(store, NotesImportRunner.MakeFakeLookup(1)).RunAsync(new[] { "bb" }, folder, null, null, CancellationToken.None);
+            var bytes = File.ReadAllBytes(path);
+            Directory.CreateDirectory(tmp);
+            var ex = Assert.Throws<NotesSaveFailedException>(() => store.UndoImportAndSave(o2.Journal));
+            Assert.False(string.IsNullOrEmpty(ex.Reason));
+            Assert.StartsWith("筆記存檔失敗：", ex.Message);
+            Assert.Equal(bytes, File.ReadAllBytes(path)); // 筆記檔不變
+            Directory.Delete(tmp);
+            Assert.Equal(1, store.UndoImportAndSave(o2.Journal).Removed); // 之後可再撤
         }
-        finally { File.Delete(path); }
+        finally
+        {
+            if (Directory.Exists(tmp)) { Directory.Delete(tmp); }
+            File.Delete(path);
+        }
     }
 
     [Fact]
@@ -360,8 +411,10 @@ public class NotesImportUndoTests
     }
 
     [Fact]
-    public async Task Integration_NotesPageStaleSnapshot_WouldWriteBack_SyncedDoesNot()
+    public async Task Integration_DiskLevel_StaleSnapshotWouldWriteBack_FreshDataDoesNot()
     {
+        // 磁碟層之對照（證明「不同步就會被蓋回」之風險為真）；筆記頁本身之同步由結構斷言（撤銷後同一呼叫內 SyncAfterUndoWrite）
+        // 與 e2e ㉓（撤銷後按「字母」排序使筆記頁整份寫回，撤銷之字仍不在）承擔——NotesPage 為 WPF 控制項、不在單元層實例化。
         var path = TempPath();
         try
         {
@@ -420,7 +473,13 @@ public class NotesImportUndoTests
     public void Structure_App_UndoFlow_RecheckAfterConfirm_SyncPage_NoFailureRecord()
     {
         var cs = Code("sysLingoIsland", "App.xaml.cs");
-        var u = Body(cs, "UndoLastImport");
+        var wrap = Body(cs, "UndoLastImport");
+        Assert.True(Idx(wrap, "_undoPrompting = true") < Idx(wrap, "UndoLastImportCore(owner)"), "撤銷流程之一切對話框期間標記 _undoPrompting");
+        Assert.True(Idx(wrap, "finally") < Idx(wrap, "ShowPendingImportResult()"), "流程結束才補開延後之結果");
+        Assert.Contains("_undoPrompting", Body(cs, "ShowLastImportResult"));
+        var u = Body(cs, "UndoLastImportCore");
+        Assert.Contains("catch (NotesSaveFailedException ex)", u);  // 以型別分流存檔失敗，不以訊息字串
+        Assert.DoesNotContain("StartsWith(", u);
         var confirm = Idx(u, "NotesImportUndoText.ConfirmText(trial)");
         var recheck = u.IndexOf("ReferenceEquals(_lastImport, m)", confirm, StringComparison.Ordinal);
         Assert.True(Idx(u, "_notesStore.PlanUndo(") < confirm);

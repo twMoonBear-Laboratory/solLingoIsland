@@ -41,18 +41,26 @@ public static class NoteImportUndo
     /// 依 Id 合併（④）：覆寫前＝最早一筆之覆寫前（最早一筆為新增即仍為新增）、寫入後＝最後一筆之寫入後、落點夾＝最早一筆之落點夾；
     /// 次序依各 Id 最後一次寫入之先後。
     /// </summary>
-    public static IReadOnlyList<NoteWriteRecord> Merge(IReadOnlyList<NoteWriteRecord> journal)
+    public static IReadOnlyList<NoteWriteRecord> Merge(IReadOnlyList<NoteWriteRecord> journal) => MergeWithChain(journal).Select(m => m.Rec).ToList();
+
+    /// <summary>
+    /// 合併並判兩次寫入之間是否被改過（④）：同一 Id 之後一筆之覆寫前須等於前一筆之寫入後，否則＝兩次寫入之間使用者改過（例如編輯重譯改了原文）→<c>Broken</c>，
+    /// 撤銷時一律跳過（「匯入後已修改」），不以最早之覆寫前蓋掉使用者之修改。
+    /// </summary>
+    private static List<(NoteWriteRecord Rec, bool Broken)> MergeWithChain(IReadOnlyList<NoteWriteRecord> journal)
     {
         var first = new Dictionary<string, NoteWriteRecord>(StringComparer.Ordinal);
         var last = new Dictionary<string, (NoteWriteRecord Rec, int Index)>(StringComparer.Ordinal);
+        var broken = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < journal.Count; i++)
         {
             var r = journal[i];
+            if (last.TryGetValue(r.After.Id, out var prev) && r.Before != prev.Rec.After) { broken.Add(r.After.Id); }
             first.TryAdd(r.After.Id, r);
             last[r.After.Id] = (r, i);
         }
         return last.OrderBy(kv => kv.Value.Index)
-            .Select(kv => first[kv.Key] with { After = kv.Value.Rec.After })
+            .Select(kv => (first[kv.Key] with { After = kv.Value.Rec.After }, broken.Contains(kv.Key)))
             .ToList();
     }
 
@@ -64,13 +72,19 @@ public static class NoteImportUndo
 
     private static NoteUndoPlan Run(NotesData d, IReadOnlyList<NoteWriteRecord> journal, bool apply)
     {
-        var merged = Merge(journal);
+        var merged = MergeWithChain(journal);
         var items = new List<NoteUndoItem>();
         for (var k = merged.Count - 1; k >= 0; k--) // 逆序
         {
-            var r = merged[k];
+            var (r, chainBroken) = merged[k];
             var word = r.After.Original;
             var (folder, idx) = Locate(d, r.After.Id);
+            if (chainBroken)
+            {
+                items.Add(new(word, r.IsAdded, NoteUndoAction.Skip, folder is null ? (r.IsAdded ? ReasonGone : ReasonGoneUpdated) : ReasonModified));
+                continue;
+            }
+            if (!r.IsAdded && r.Before!.Phonetic == r.After.Phonetic && r.Before.Translation == r.After.Translation) { continue; } // 覆寫前後相同：無須還原、不計
             if (r.IsAdded)
             {
                 if (folder is null) { items.Add(new(word, true, NoteUndoAction.Skip, ReasonGone)); continue; }

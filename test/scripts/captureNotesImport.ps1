@@ -555,6 +555,9 @@ try {
   Click-Element -El $probeText
   Start-Sleep -Milliseconds 700
   Write-Host "* 已選取探針夾"
+  # #324：本次啟動後尚無匯入——「上次匯入結果」Collapsed（不在 UIA 樹或不可見）
+  $lr0 = Find-ByAutomationId -Root $root -Id "NotesImportLastResultBtn"
+  if ($null -ne $lr0 -and -not $lr0.Current.IsOffscreen) { $fails += "㉔：app 啟動後尚無匯入，「上次匯入結果」卻可見" }
 
   # 訴求1：匯入鈕啟用
   $importBtn = Find-ByAutomationId -Root $root -Id "NotesImportBtn"
@@ -1182,9 +1185,18 @@ try {
   if ($null -eq $hint -or $hint.Current.Name -notlike "*上次匯入結果*") { $fails += "㉓：撤銷說明列取不到或不符" }
   # 模擬匯入後使用者以右鍵改 glimmer 底色
   Edit-NotesRaw { param($t) [regex]::new('("Original":\s*"glimmer",\s*"Phonetic":\s*"[^"]*",\s*"Translation":\s*"[^"]*",\s*"Color":\s*)"[^"]*"').Replace($t, '$1"#ABCDEF"', 1) }
+  # 先按「否」：狀態不變、筆記不動
   Invoke-El $undo
   $ask = Wait-UndoAsk
   if ($null -eq $ask) { throw "㉓：按撤銷後未見確認框（Title 撤銷本次匯入）" }
+  $no = Find-AskButton $ask @("否", "No")
+  if ($null -eq $no) { throw "㉓：確認框找不到「否」" }
+  Press-AskButton $ask $no "㉓"; Start-Sleep -Milliseconds 800
+  $undo = Find-ByAutomationId -Root $res23 -Id "NotesImportResultUndo"
+  if (-not $undo.Current.IsEnabled -or -not (Get-EntryOf "ember")) { $fails += "㉓：確認框按「否」後狀態或筆記有變" }
+  Invoke-El $undo
+  $ask = Wait-UndoAsk
+  if ($null -eq $ask) { throw "㉓：第二次按撤銷後未見確認框" }
   $askText = Get-AskText $ask
   Write-Host "* ㉓ 確認框＝「$askText」"
   foreach ($must in @("移除這次新增的 2 字", "把這次更新的 1 字還原為匯入前的音標與中譯", "1 字在匯入後已修改、移動或刪除，保持現狀不動：glimmer", "撤銷後無法再復原")) {
@@ -1192,7 +1204,11 @@ try {
   }
   $yes = Find-AskButton $ask @("是", "Yes")
   if ($null -eq $yes) { throw "㉓：確認框找不到「是」" }
-  Press-AskButton $ask $yes "㉓"; Start-Sleep -Milliseconds 1200
+  Press-AskButton $ask $yes "㉓"; Start-Sleep -Milliseconds 600
+  $toast23 = Find-ToastText "已撤銷本次匯入"
+  Write-Host "* ㉓ toast＝「$toast23」"
+  if ($toast23 -notlike "*移除 2 字、還原 1 字（跳過 1 字）*") { $fails += "㉓：未見撤銷完成 toast 或文案不符" }
+  Start-Sleep -Milliseconds 600
   $rr = Read-ResultWindow $res23
   Write-Host "* ㉓ 撤銷後：Title＝「$($rr.Title)」標頭＝「$($rr.Header)」內文首段＝「$(($rr.Body -split "`n")[0])」"
   if ($rr.Title -ne "匯入清單：已撤銷" -or $rr.Header -ne "已撤銷本次匯入") { $fails += "㉓：撤銷後 Title／標頭不符" }
@@ -1211,6 +1227,12 @@ try {
   Start-Sleep -Milliseconds 2500   # 條目區重繪節流 2 秒
   $panelTexts = @((Find-ByAutomationId -Root $root -Id "EntryScroll").FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Text))) | ForEach-Object { $_.Current.Name })
   if ($panelTexts -contains "ember" -or $panelTexts -contains "radiance") { $fails += "㉓：筆記分頁未隨撤銷同步（仍見已撤之字）" }
+  # ⑥：撤銷後筆記頁自身之整份存檔（按「字母」排序）不得把撤銷蓋回
+  Set-WindowForeground -Hwnd $hwnd | Out-Null; Start-Sleep -Milliseconds 300
+  Invoke-El (Find-ByAutomationId -Root $root -Id "AlphaSortBtn"); Start-Sleep -Milliseconds 800
+  $willow2 = Get-EntryOf "willow"
+  if ((Get-EntryOf "ember") -or (Get-EntryOf "radiance") -or $willow2.Translation -ne $willowOrig) { $fails += "㉓：撤銷後筆記頁整份存檔把撤銷蓋回" }
+  else { Write-Host "* ㉓ 撤銷後按「字母」排序（筆記頁整份寫回）：撤銷未被蓋回" }
   Close-ResultWindow $res23
   if (@($fails | Where-Object { $_ -match "^㉓" }).Count -eq 0) { Write-Host "* [OK] ㉓ 撤銷：移除 2、還原 1、改過者跳過並列出、筆記頁同步" -ForegroundColor Green }
 
