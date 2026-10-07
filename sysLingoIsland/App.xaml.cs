@@ -534,7 +534,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex) // 守備：執行器本身不往外擲（中斷以 Error 回傳）
         {
-            outcome = new NotesImportOutcome(0, 0, Array.Empty<string>(), Array.Empty<(string, string)>()) { Error = ex.Message };
+            outcome = runner.Snapshot() with { Cancelled = false, Error = ex.Message }; // #323：保留已累積之逐字結果（失敗字照記）
         }
         finally
         {

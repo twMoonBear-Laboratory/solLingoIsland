@@ -1153,7 +1153,7 @@ try {
   if ($k18 -lt 1 -or $k18 -gt 19) { $fails += "⑱：結束後該批字數 $k18 不在 1–19（已加入者應保留、其餘不加入）" }
   elseif ($exited) { Write-Host "* [OK] ⑱ 結束確認：否＝繼續、是＝結束且已加入者保留" -ForegroundColor Green }
   if ((Get-LedgerBytes).Length -ne $ledgerBefore.Length) { $fails += "⑱：AI 花費帳本有變動（輔證）" }
-  # #323：結束入口於取消權杖之前以累積結果更新紀錄——已失敗之 lighthouse 記下、未處理之字不記
+  # #323：結束時已失敗之 lighthouse 記下、未處理之字不記（只驗行為，不分辨是結束入口之 Snapshot() 或取消後仍跑到之收尾所記；路徑由整合與結構斷言承擔）
   $logText = if (Test-Path $failLog) { Get-Content $failLog -Raw -Encoding UTF8 } else { "" }
   $f18 = if ($logText) { @(($logText | ConvertFrom-Json).Files) | Where-Object { $_.Path -eq (Resolve-Path $unit8Path).Path } | Select-Object -First 1 } else { $null }
   Write-Host "* ⑱ 結束後紀錄（unit8）＝$(if ($null -ne $f18) { @($f18.Words) -join ',' } else { '（無）' })"
