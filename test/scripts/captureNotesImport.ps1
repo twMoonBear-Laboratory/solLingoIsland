@@ -33,7 +33,9 @@
        →出現「約剩」時擷取手冊圖 notes-import-background.png→結果視窗「匯入完成」「已加入 8 字」→進度列隱藏、8 字皆在且中譯為〔測試假查詢〕。
     ⑯ 20 字 txt 實按加入→執行中再按「匯入清單」：不開檔案對話框、toast「已有一批匯入正在進行」。
     ⑰ 同批已完成 ≥2 時按進度列「取消」→結果視窗「匯入已取消」→notes.json 該批字數 k＝結果之「已加入 k 字」且 2≤k≤19。
+    ⑲ 3 字 txt 實按加入後最小化主視窗→toast「匯入清單已結束——打開主視窗看結果」、結果視窗未開→還原→結果視窗才開。
     ⑱ 20 字 txt 實按加入→PostMessage(WM_CLOSE) 關主視窗→確認框「匯入進行中」→按「否」：app 仍在、匯入續進→再關→按「是」：行程結束、已加入者保留。
+    （⑯ 另以真實 OLE 拖放一個 txt：不可放置、toast 同句、不開確認頁；⑮ 另斷言使用者之「字母」排序於匯入後仍保留。）
   落點被他窗覆蓋即據實中止（不判 PASS）。
 
   查詢並加入之成功／失敗路徑由 NotesImportRunnerTests 以 fake 委派覆蓋（零額度）；本腳本刻意只走到確認頁並取消，不花 OpenAI 額度（USR 常設裁定）。
@@ -53,6 +55,8 @@ $ErrorActionPreference = "Stop"
 Write-Host "# I.主旨目的 ================================" -ForegroundColor Blue
 Write-Host "* 驗證筆記頁匯入英文清單（Issue #309）於實機成立：選夾→匯入鈕→檔案對話框→確認頁列數與狀態→全不選停用→取消零呼叫。"
 Write-Host "* 並驗多檔與拖放（Issue #320）：多選兩檔合併去重與來源欄、真實 OLE 拖放同一張表、非清單檔拒收提示、混雜檔未納入、既有卡片拖曳不受影響。"
+Write-Host "* 並驗 CSV 第二欄自備中譯（Issue #321）：中譯來源欄、整批切換、全自備實按零查詢寫入。"
+Write-Host "* 並驗大量匯入背景執行（Issue #322）：非模態、進度與剩餘時間、匯入中筆記頁整份寫回不覆蓋、重入（按鈕與拖放）、取消、最小化時完成、結束確認（延遲假查詢、零額度）。"
 #endregion
 
 #region II.參考準備 ================================
@@ -88,6 +92,8 @@ Write-Host "# II.參考準備 ================================" -ForegroundColor
   $unit6Path = Join-Path $sampleDir "unit6-background.txt"
   $unit7Path = Join-Path $sampleDir "unit7-cancel.txt"
   $unit8Path = Join-Path $sampleDir "unit8-exit.txt"
+  $unit9Path = Join-Path $sampleDir "unit9-minimized.txt"
+  $minWords  = @("orchard", "meadow", "prairie")
   $bgPng     = Join-Path $repoRoot "docs\manual-assets\notes-import-background.png"
   $origFakeMs = $env:LINGOISLAND_IMPORT_FAKE_LOOKUP_MS
   $origApiKey = $env:OPENAI_API_KEY
@@ -456,7 +462,7 @@ try {
   $data = [pscustomobject]@{ Folders = @([pscustomobject]@{ Id = ([guid]::NewGuid().ToString("N")); Name = "My Notes"; Folders = @(); Sort = $null; Entries = @() }) }
   $data.Folders = @(@($data.Folders) | Where-Object { $_.Id -ne $probeId })
   Remove-WordsEverywhere $data.Folders $sampleOwnWords   # #321：樣本字不得預先存在（APPDATA 已備份、finally 還原）
-  Remove-WordsEverywhere $data.Folders ($bgWords + $cancelWords + $exitWords)   # #322 樣本字同理
+  Remove-WordsEverywhere $data.Folders ($bgWords + $cancelWords + $exitWords + $minWords)   # #322 樣本字同理
   $mkEntry = { param($w) [pscustomobject]@{ Id = ([guid]::NewGuid().ToString("N")); AddedAt = "2026-10-06T00:00:00.0000000+08:00"; Original = $w; Phonetic = "[$w]"; Translation = "譯:$w"; Color = ""; PracticeScore = -1 } }
   $data.Folders = @($data.Folders) + ([pscustomobject]@{
     Id = $probeId; Name = $probeName; Folders = @(); Sort = $null
@@ -909,7 +915,7 @@ try {
   $d0 = Get-ProgressDone
   $d1 = Wait-ProgressDone -AtLeast ($d0 + 1) -TimeoutSec 10   # 切回之後又有匯入寫入——筆記頁須靠同步才有新字
   Write-Host "* ⑮ 切回筆記後已完成 $d0 → $d1"
-  if ($d1 -le $d0) { $notes += "⑮：切回後等不到新寫入（$d0→$d1），排序覆蓋之斷言強度降低" }
+  if ($d1 -le $d0) { $fails += "⑮：切回筆記後等不到新寫入（$d0→$d1）——排序之整份寫回無從證明不覆蓋匯入之字" }
   $alpha = Find-ByAutomationId -Root $root -Id "AlphaSortBtn"
   if ($null -eq $alpha) { $fails += "⑮：找不到「字母」排序鈕" } else { Invoke-El $alpha; Write-Host "* ⑮ 已按「字母」排序（筆記頁整份寫回）" }
   # 剩餘時間出現（滿 2 筆）→ 手冊圖
@@ -937,6 +943,9 @@ try {
   $got = @(@($pf.Entries) | Where-Object { $bgWords -contains $_.Original })
   Write-Host "* ⑮ 探針夾內該批字數＝$($got.Count)；中譯樣例＝「$(@($got)[0].Translation)」"
   if ($got.Count -ne 8) { $fails += "⑮：探針夾內該批字數＝$($got.Count)≠8——筆記頁之整份寫回覆蓋了匯入之字？" }
+  $sortMode = if ($null -ne $pf.Sort) { [string]$pf.Sort.Mode } else { "" }
+  Write-Host "* ⑮ 探針夾排序模式＝「$sortMode」（1＝字母）"
+  if ($sortMode -notin @("1", "Alpha")) { $fails += "⑮：使用者於匯入期間之「字母」排序未保留（實得「$sortMode」）——匯入之寫入覆蓋了使用者之整理？" }
   if (@($got | Where-Object { -not $_.Translation.StartsWith("〔測試假查詢〕") }).Count -gt 0) { $fails += "⑮：有字之中譯不是測試縫假查詢結果——疑似走了真查詢" }
   if ((Get-LedgerBytes).Length -ne $ledgerBefore.Length) { $fails += "⑮：AI 花費帳本有變動（輔證）" }
   #endregion
@@ -953,6 +962,14 @@ try {
   Write-Host "* ⑯ toast＝「$toast16」／檔案對話框＝$($null -ne $dlg16)"
   if ($null -ne $dlg16) { $fails += "⑯：匯入執行中再按「匯入清單」卻開了檔案對話框"; [System.Windows.Forms.SendKeys]::SendWait("{ESC}") }
   if ($toast16 -eq "") { $fails += "⑯：未見 toast「已有一批匯入正在進行」" }
+  # 拖放入口同樣不受理：真實 OLE 拖放一個 txt 到條目區——不可放置、toast 同句、不開確認頁
+  $bp = Get-EntryBlankPoint
+  Start-Sleep -Milliseconds 2600   # 等上一則 toast 消失，免誤認
+  $drag16 = Invoke-FileDrag -Files @($unit3Path) -TargetX $bp.X -TargetY $bp.Y -WatchToast "已有一批匯入正在進行"
+  Write-Host "* ⑯ 拖放：命中=$($drag16.HitOk) toast=「$($drag16.Toast)」效果=$($drag16.Effect)"
+  if (-not $drag16.HitOk) { throw "⑯：拖放落點被他窗覆蓋——本輪無法判定，據實中止" }
+  if ($drag16.Toast -eq "" -or $drag16.Effect -ne "None") { $fails += "⑯：匯入執行中拖入 txt 未被擋（toast「$($drag16.Toast)」、效果 $($drag16.Effect)）" }
+  if ($null -ne (Wait-Confirm -TimeoutSec 2)) { $fails += "⑯：匯入執行中拖入 txt 卻開了確認頁"; Close-Confirm (Wait-Confirm -TimeoutSec 1) }
   $d17 = Wait-ProgressDone -AtLeast 2 -TimeoutSec 15
   if ($d17 -ge 20 -or $d17 -lt 2) { throw "⑰：已完成數 $d17 不在可取消區間——時序不成立，據實中止" }
   $cancel = Find-ByAutomationId -Root $root -Id "NotesImportProgressCancel"
@@ -972,6 +989,28 @@ try {
     if ($k -ne $onDisk -or $k -lt 2 -or $k -gt 19) { $fails += "⑰：取消後磁碟字數 $onDisk 與結果 k＝$k 不符或不在 2–19" }
     else { Write-Host "* [OK] ⑰ 取消：已完成者保留、其餘不寫入" -ForegroundColor Green }
     Close-ResultWindow $res17
+  }
+  #endregion
+
+  #region P2.#322 ⑲ 主視窗最小化時完成：先 toast、結果視窗待還原才開 --------------------------------
+  Write-Host "## P2.#322 ⑲ 最小化時完成 --------------------------------" -ForegroundColor Cyan
+  Set-Content -Path $unit9Path -Value ($minWords -join "`r`n") -Encoding utf8NoBOM
+  Start-BackgroundImport -Path $unit9Path -N 3 -Tag "⑲"
+  [Win32Ui]::ShowWindow($hwnd, 6) | Out-Null   # SW_MINIMIZE
+  $toast19 = ""; $tEnd = (Get-Date).AddSeconds(15)
+  while ((Get-Date) -lt $tEnd -and $toast19 -eq "") { $toast19 = Find-ToastText "匯入清單已結束"; Start-Sleep -Milliseconds 200 }
+  Write-Host "* ⑲ 最小化中之 toast＝「$toast19」"
+  if ($toast19 -notlike "*打開主視窗看結果*") { $fails += "⑲：最小化時完成未見 toast「匯入清單已結束——打開主視窗看結果」" }
+  if ($null -ne (Wait-ResultWindow -TimeoutSec 1)) { $fails += "⑲：主視窗最小化時就開了結果視窗（應待還原）" }
+  [Win32Ui]::ShowWindow($hwnd, 9) | Out-Null   # SW_RESTORE
+  Set-WindowMaximized -Hwnd $hwnd | Out-Null
+  $res19 = Wait-ResultWindow -TimeoutSec 8
+  if ($null -eq $res19) { $fails += "⑲：還原主視窗後未開結果視窗" }
+  else {
+    $rr = Read-ResultWindow $res19
+    if ($rr.Body -notlike "匯入完成：已加入 3 字*") { $fails += "⑲：結果視窗內文「$($rr.Body)」非「匯入完成：已加入 3 字…」" }
+    else { Write-Host "* [OK] ⑲ 最小化時完成：先 toast、還原後才開結果視窗" -ForegroundColor Green }
+    Close-ResultWindow $res19
   }
   #endregion
 
@@ -1040,6 +1079,6 @@ if ($fails.Count -gt 0) {
   $fails | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
   exit 1
 }
-Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪、#321 ⑫–⑭、#322 ⑮–⑱ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
+Write-Host "* 結果：PASS（#309 訴求 1–5、#320 ⑥–⑪、#321 ⑫–⑭、#322 ⑮–⑲ 全數成立；全程 0 次 OpenAI 呼叫）" -ForegroundColor Green
 exit 0
 #endregion

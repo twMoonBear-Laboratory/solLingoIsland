@@ -85,13 +85,13 @@ public partial class OptionsPage : UserControl, IUnsavedGuardPage
         }
     }
 
-    /// <summary>匯入資料（#206）：確認 → 驗備份 → 先解壓暫存再搬入（解壓失敗不動本機資料）→ 提示並關閉程式（重啟後套用）；還原走背景執行緒、執行中禁用雙鈕。</summary>
     /// <summary>匯入清單背景執行中時回提示文案（#322；App 注入）：備份還原與匯入清單雙向互斥。</summary>
     public Func<string?>? RestoreBlockedReason { get; set; }
 
     /// <summary>備份還原進行中（#322）：自確認還原至程式結束；還原失敗即解除。供 App 擋匯入清單。</summary>
     public bool RestoreRunning { get; private set; }
 
+    /// <summary>匯入資料（#206）：確認 → 驗備份 → 先解壓暫存再搬入（解壓失敗不動本機資料）→ 提示並關閉程式（重啟後套用）；還原走背景執行緒、執行中禁用雙鈕。</summary>
     private async void OnImportData()
     {
         if (RestoreBlockedReason?.Invoke() is { } why)

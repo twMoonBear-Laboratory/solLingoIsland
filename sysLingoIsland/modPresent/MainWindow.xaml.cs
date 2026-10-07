@@ -254,10 +254,18 @@ public partial class MainWindow : Window
         ImportProgressBar.Value = Math.Clamp(done, 0, Math.Max(1, total));
         ImportProgressCancel.IsEnabled = !cancelling;
         ImportProgressPanel.Visibility = Visibility.Visible;
+        // 工作列按鈕同步顯示進度（Windows 長時作業慣例；主視窗被蓋住或最小化時也看得到）
+        TaskbarItemInfo ??= new System.Windows.Shell.TaskbarItemInfo();
+        TaskbarItemInfo.ProgressState = cancelling ? System.Windows.Shell.TaskbarItemProgressState.Paused : System.Windows.Shell.TaskbarItemProgressState.Normal;
+        TaskbarItemInfo.ProgressValue = total > 0 ? Math.Clamp((double)done / total, 0, 1) : 0;
     }
 
-    /// <summary>隱藏匯入進度列（#322）：匯入結束即收起、不佔位。</summary>
-    public void HideImportProgress() => ImportProgressPanel.Visibility = Visibility.Collapsed;
+    /// <summary>隱藏匯入進度列（#322）：匯入結束即收起、不佔位，工作列進度一併清除。</summary>
+    public void HideImportProgress()
+    {
+        ImportProgressPanel.Visibility = Visibility.Collapsed;
+        if (TaskbarItemInfo is not null) { TaskbarItemInfo.ProgressState = System.Windows.Shell.TaskbarItemProgressState.None; }
+    }
 
     /// <summary>從收合狀態還原並帶到前景。</summary>
     public void RestoreFromTray()

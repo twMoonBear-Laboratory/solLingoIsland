@@ -4,7 +4,7 @@
         Title="匯入清單：完成" Width="480" Height="380"
         MinWidth="360" MinHeight="240"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False" ShowActivated="False"
-        ResizeMode="CanResizeWithGrip"
+        ResizeMode="CanResizeWithGrip" WindowStyle="ToolWindow"
         AutomationProperties.AutomationId="NotesImportResultWindow"
         Background="{StaticResource PinkBg}">
   <!-- [modHmi匯入結果視窗]（spec#14，#322）：非模態、不搶焦點（ShowActivated=False）、可捲動可選取複製之結果表；標頭＝匯入完成／匯入已取消／匯入中斷 -->

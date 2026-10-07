@@ -342,6 +342,70 @@ public class NotesImportBackgroundTests
         Assert.Single(d.Folders);
     }
 
+    // ---- 筆記頁同步之純函式（NotesPageSync）----
+
+    [Fact]
+    public void StructureSignature_IgnoresSiblingOrder_DetectsRealChanges()
+    {
+        var a = new NotesData();
+        var x = new NoteFolder { Id = "x", Name = "Zeta" };
+        var y = new NoteFolder { Id = "y", Name = "Alpha" };
+        a.Folders.Add(x); a.Folders.Add(y);
+        var b = new NotesData();
+        b.Folders.Add(new NoteFolder { Id = "y", Name = "Alpha" }); b.Folders.Add(new NoteFolder { Id = "x", Name = "Zeta" });
+        Assert.Equal(NotesPageSync.StructureSignature(a), NotesPageSync.StructureSignature(b));   // 磁碟未排序 vs 記憶體已排序：不算結構有變
+        b.Folders[0].Name = "Alpha2";
+        Assert.NotEqual(NotesPageSync.StructureSignature(a), NotesPageSync.StructureSignature(b)); // 改名
+        b.Folders[0].Name = "Alpha";
+        b.Folders[0].Folders.Add(new NoteFolder { Id = "z", Name = "Sub" });
+        Assert.NotEqual(NotesPageSync.StructureSignature(a), NotesPageSync.StructureSignature(b)); // 新增子夾
+    }
+
+    [Fact]
+    public void DisplaySignature_ChangesOnNewWordOrContent()
+    {
+        var e1 = NoteEntry.From(new QueryResult("a", "", "x"), DateTimeOffset.Now);
+        var s1 = NotesPageSync.DisplaySignature(new[] { e1 });
+        Assert.Equal(s1, NotesPageSync.DisplaySignature(new[] { e1 }));
+        Assert.NotEqual(s1, NotesPageSync.DisplaySignature(new[] { e1 with { Translation = "y" } }));
+        Assert.NotEqual(s1, NotesPageSync.DisplaySignature(new[] { NoteEntry.From(new QueryResult("new", "", ""), DateTimeOffset.Now), e1 }));
+        Assert.Equal("", NotesPageSync.DisplaySignature(null));
+    }
+
+    [Theory]
+    // 畫面顯示 [b,c,d]（尚未重繪出匯入剛插在頂端之 n1），資料為 [n1,b,c,d]；拖 d 到 b、c 之間（槽位 1）
+    [InlineData(new[] { "b", "c", "d" }, 1, new[] { "n1", "b", "c" }, "d", 3, 2)]   // 插在 c 之前＝資料索引 2（不是畫面索引 1）
+    [InlineData(new[] { "b", "c", "d" }, 3, new[] { "n1", "c", "d" }, "b", 1, 3)]   // 末端：插在最後一張顯示卡 d 之後
+    [InlineData(new[] { "b", "c", "d" }, 0, new[] { "n1", "c", "d" }, "b", 1, 1)]   // 鄰卡即自身：留原位
+    [InlineData(new[] { "b", "gone", "d" }, 1, new[] { "n1", "b" }, "d", 2, 2)]     // 鄰卡已被刪：留原位
+    public void DropIndex_UsesNeighbourIdNotScreenIndex(string[] shown, int slot, string[] afterRemoval, string moving, int from, int expected)
+        => Assert.Equal(expected, NotesPageSync.DropIndex(shown, slot, afterRemoval, moving, from));
+
+    [Fact]
+    public async Task LockedFile_DoesNotTriggerEarlyStop_OtherWordsStillQueried()
+    {
+        var path = TempPath();
+        try
+        {
+            var (store, folderId) = Seed(path);
+            var calls = new List<string>();
+            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None); // 前 3 字寫入時檔被鎖
+            Func<string, CancellationToken, Task<QueryResult>> lookup = (w, _) =>
+            {
+                calls.Add(w);
+                if (w == "w4") { stream.Dispose(); }   // 第 4 字時解鎖
+                return Task.FromResult(new QueryResult(w, "", "譯"));
+            };
+            var outcome = await new NotesImportRunner(store, lookup).RunAsync(new[] { "w1", "w2", "w3", "w4", "w5" }.Select(w => new NotesImportItem(w)).ToList(), folderId, null, null, CancellationToken.None);
+            stream.Dispose();
+            Assert.Equal(new[] { "w1", "w2", "w3", "w4", "w5" }, calls);            // 鎖檔失敗不算金鑰／網路之連續失敗：不早停
+            Assert.Equal(3, outcome.Failed.Count);
+            Assert.All(outcome.Failed, f => Assert.StartsWith("讀取筆記檔失敗", f.Reason));
+            Assert.Equal(new[] { "w4", "w5" }, outcome.AddedWords);
+        }
+        finally { File.Delete(path); }
+    }
+
     // ---- 結構斷言（讀原始碼純文字）----
 
     [Fact]
@@ -360,6 +424,9 @@ public class NotesImportBackgroundTests
         var cb = Body(app, "private void OnImportProgress(");
         Assert.Contains("SyncAfterImportWrite", cb);
         Assert.True(cb.IndexOf("SyncAfterImportWrite", StringComparison.Ordinal) < cb.IndexOf("UpdateImportProgress", StringComparison.Ordinal)); // 先同步再更新畫面
+        Assert.True(run.IndexOf("if (ImportRunning)", StringComparison.Ordinal) < run.IndexOf("RunOwnOnlyNotesImport", StringComparison.Ordinal)); // 同一時間至多一批（含全自備）
+        Assert.Contains("OnSessionEnding", app);
+        Assert.Contains("_exitPrompting", Body(app, "private void ExitApp("));
         var own = Body(app, "private void RunOwnOnlyNotesImport(");
         Assert.DoesNotContain("MessageBox", own);
         Assert.Contains("ShowPendingImportResult", own);
@@ -390,6 +457,12 @@ public class NotesImportBackgroundTests
         Assert.Contains("ImportBlockedReason", Body(page, "private void BeginImportList("));
         Assert.Contains("ImportBlockedReason", Body(page, "private void OnFileDrop("));
         Assert.DoesNotContain("_store.Save(_data)", page);                             // 筆記頁存檔一律經可偵知失敗之出口
+        var holdLine = page.Substring(page.IndexOf("private bool RowsHold", StringComparison.Ordinal), 200);
+        Assert.Contains("_practiceBusy", holdLine);                                     // 評分中亦延後
+        Assert.Contains("PointerBusy", holdLine);                                       // 指標互動中亦延後
+        Assert.Contains("_renaming || RowsHold", page);                                 // 重建樹必連帶重建條目區
+        Assert.Contains("NotesPageSync.StructureSignature", sync);                      // 與兄弟順序無關
+        Assert.Contains("NotesPageSync.DropIndex", Body(page, "private void OnEntryAreaDrop("));
         var reload = Body(page, "public void Reload(");
         Assert.Contains("TryLoadStrict", reload);
         var xaml = ReadRepoFile("sysLingoIsland", "modPresent", "NotesImportResultWindow.xaml");

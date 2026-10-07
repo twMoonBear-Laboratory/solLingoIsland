@@ -15,9 +15,7 @@ public partial class AboutPage : UserControl
     private readonly UpdateService? _updates;
 
     /// <summary>「重啟以更新」前之確認（#322；App 注入）：匯入清單背景執行中即問是否停止匯入，回 false＝不重啟。</summary>
-
     public Func<bool>? ConfirmRestart { get; set; }
-
 
     public AboutPage(UpdateService? updates = null)
     {

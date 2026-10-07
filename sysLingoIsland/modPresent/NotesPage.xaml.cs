@@ -96,8 +96,19 @@ public partial class NotesPage : UserControl
     /// <summary>匯入是否不受理及原因（#322；App 注入）：背景匯入執行中或備份還原進行中回提示文案，否則 null。</summary>
     public Func<string?>? ImportBlockedReason { get; set; }
 
-    private bool RowsHold => _recording is not null || _entryEditing || _dragging || _menusOpen > 0;
-    private bool TreeHold => _renaming || _dragging || _menusOpen > 0;
+    private long _lastPointerUpTick;   // 最近一次在本頁放開滑鼠鍵之時刻（雙擊之兩擊之間不重繪）
+    private System.Windows.Threading.DispatcherTimer? _flushTimer;   // 指標操作結束後補做延後之重繪
+    private System.Windows.Threading.DispatcherTimer? _syncRetryTimer; // 匯入結束時仍讀不到檔：每 2 秒重試同步
+
+    /// <summary>指標互動進行中（#322）：滑鼠鍵按著在本頁、條目握把已按下待拖、或剛放開仍在雙擊間隔內——此時不重建其下之元素。</summary>
+    private bool PointerBusy => _entryDrag is not null
+                                || (IsMouseOver && System.Windows.Input.Mouse.LeftButton == MouseButtonState.Pressed)
+                                || Environment.TickCount64 - _lastPointerUpTick < System.Windows.Forms.SystemInformation.DoubleClickTime + 100;
+
+    // 延後條件（#322 ⑥(c)）：錄音按住中、評分中（放開後至分數落地）、改原文編輯框、拖曳、右鍵選單、指標互動中
+    private bool RowsHold => _recording is not null || _practiceBusy || _entryEditing || _dragging || _menusOpen > 0 || PointerBusy;
+    // 重建樹必連帶重建條目區，故亦須條目區不在延後條件中
+    private bool TreeHold => _renaming || RowsHold;
 
     public event Action<NoteEntry>? ViewRequested;
 
@@ -135,6 +146,15 @@ public partial class NotesPage : UserControl
         PreviewDragOver += OnFileDragOver;
         PreviewDragLeave += OnFileDragLeave;
         PreviewDrop += OnFileDrop;
+        PreviewMouseUp += (_, _) =>   // #322：指標操作結束（含雙擊間隔）後補做延後之重繪
+        {
+            _lastPointerUpTick = Environment.TickCount64;
+            _flushTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(System.Windows.Forms.SystemInformation.DoubleClickTime + 150) };
+            _flushTimer.Tick -= OnFlushTimer;
+            _flushTimer.Tick += OnFlushTimer;
+            _flushTimer.Stop();
+            _flushTimer.Start();
+        };
         AlphaSortBtn.Click += (_, _) => ToggleSort(NoteSortMode.Alpha);   // 字母（#126：同鈕再點翻方向）
         TimeSortBtn.Click += (_, _) => ToggleSort(NoteSortMode.Time);     // 日期
         ManualSortBtn.Click += (_, _) => ToggleSort(NoteSortMode.Manual); // 自訂順序（拖曳序 正/反）
@@ -172,7 +192,7 @@ public partial class NotesPage : UserControl
         if (!_store.TryLoadStrict(out var fresh, out _)) { _syncPending = true; return; }
         _syncPending = false;
         var before = DisplaySignature(Selected);
-        var structChanged = StructureSignature(_data) != StructureSignature(fresh);
+        var structChanged = NotesPageSync.StructureSignature(_data) != NotesPageSync.StructureSignature(fresh); // 與兄弟順序無關
         _data = fresh;
         if (structChanged && !TreeHold) { BuildTree(); return; }
         if (structChanged) { _treeStale = true; }
@@ -185,6 +205,29 @@ public partial class NotesPage : UserControl
     public void FinishBackgroundImport()
     {
         SyncAfterImportWrite();
+        FlushDeferred();
+        if (_syncPending) { StartSyncRetry(); } // 匯入結束時仍讀不到檔：toast 並每 2 秒重試，直到讀得到
+    }
+
+    private void StartSyncRetry()
+    {
+        ToastNotifier.Show("暫時讀不到筆記檔（可能被其他程式鎖住）——筆記頁稍後自動更新");
+        _syncRetryTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _syncRetryTimer.Tick -= OnSyncRetry;
+        _syncRetryTimer.Tick += OnSyncRetry;
+        _syncRetryTimer.Start();
+    }
+
+    private void OnSyncRetry(object? sender, EventArgs e)
+    {
+        if (!_syncPending) { _syncRetryTimer?.Stop(); return; }
+        SyncAfterImportWrite();
+        if (!_syncPending) { _syncRetryTimer?.Stop(); FlushDeferred(); }
+    }
+
+    private void OnFlushTimer(object? sender, EventArgs e)
+    {
+        _flushTimer?.Stop();
         FlushDeferred();
     }
 
@@ -207,19 +250,7 @@ public partial class NotesPage : UserControl
         return false;
     }
 
-    private static string StructureSignature(NotesData d)
-    {
-        var sb = new System.Text.StringBuilder();
-        void Walk(IEnumerable<NoteFolder> fs, string parent)
-        {
-            foreach (var f in fs) { sb.Append(parent).Append('>').Append(f.Id).Append(':').Append(f.Name).Append('|'); Walk(f.Folders, f.Id); }
-        }
-        Walk(d.Folders, "");
-        return sb.ToString();
-    }
-
-    private static string DisplaySignature(NoteFolder? f)
-        => f is null ? "" : string.Join("|", DisplayEntries(f).Select(e => e.Id + "" + e.Phonetic + "" + e.Translation));
+    private static string DisplaySignature(NoteFolder? f) => NotesPageSync.DisplaySignature(f is null ? null : DisplayEntries(f));
 
     /// <summary>樹節點就地改指新資料並更新條目數（#322；不重建、不打斷更名框）。</summary>
     private void RetagTree(System.Windows.Controls.ItemCollection items)
@@ -258,6 +289,7 @@ public partial class NotesPage : UserControl
     {
         if (_treeStale && !TreeHold) { BuildTree(); return; }
         if (_rowsStale && !RowsHold) { RequestBackgroundRender(); }
+        else if ((_rowsStale || _treeStale) && PointerBusy) { _flushTimer?.Stop(); _flushTimer?.Start(); } // 仍在雙擊間隔：稍後再補
     }
 
     /// <summary>以頂端卡為錨之重繪（#322）：新字插在上方時正在讀的內容不跳動；並依 Id 還原單擊選取。</summary>
@@ -275,11 +307,13 @@ public partial class NotesPage : UserControl
             }
         }
         var keepSel = _selectedEntryId;
+        var hadFocus = EntryPanel.IsKeyboardFocusWithin; // 選取與鍵盤焦點一致（選取後 Delete 可刪，v1.0.1）
         RenderFolder();
         if (keepSel is not null && EntryPanel.Children.OfType<Border>().FirstOrDefault(b => b.Tag is NoteEntry ne && ne.Id == keepSel) is { } selCard)
         {
             _selector.Select(selCard);
             _selectedEntryId = keepSel;
+            if (hadFocus) { selCard.Focus(); }
         }
         if (anchorId is not null)
         {
@@ -358,7 +392,12 @@ public partial class NotesPage : UserControl
             return;
         }
 
-        var data = _store.LoadEnsured(); // 以磁碟現況判「已在筆記」（他處可能剛加入）
+        if (!_store.TryLoadStrict(out var data, out var readErr)) // #322：讀失敗不得以空結構判「新字」——已在筆記者會被付費重查覆寫
+        {
+            System.Windows.MessageBox.Show(owner, readErr + "\n（筆記檔可能被其他程式暫時鎖住，請稍後再匯入一次。）", "匯入清單",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
         var scan = NotesImport.ScanSources(load.Sources,
             key => NotesStore.FolderOfKey(data, key) is { } f ? NotesStore.FolderPath(data, f.Id) : null); // 已在筆記者附所在夾（B-3）
         if (!scan.IsOk)
@@ -844,6 +883,14 @@ public partial class NotesPage : UserControl
             return;
         }
         if (!EnsureFresh()) { return; } // #322
+        // #322：確認框開著期間背景匯入可能又寫進此夾——影響範圍變了就如實再問一次
+        if (NotesStore.FindFolder(_data, f.Id) is { } now && (now.Entries.Count != f.Entries.Count || now.Folders.Count != f.Folders.Count)
+            && MessageBox.Show($"資料夾「{now.Name}」剛有匯入的新字，現在有 {now.Entries.Count} 則筆記——確定要連同子資料夾一起刪除嗎？此操作無法復原。",
+                               "刪除資料夾", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+        {
+            return;
+        }
+        if (!EnsureFresh()) { return; }
         NotesStore.RemoveFolder(_data, f.Id);
         Persist();
     }
@@ -1201,6 +1248,7 @@ public partial class NotesPage : UserControl
             {
                 NotifyFail(cell, "沒有可評分的錄音。");
             }
+            FlushDeferred(); // #322：錄音結束即補做延後之重繪
             return;
         }
         var assessor = _assessor();
@@ -1208,6 +1256,7 @@ public partial class NotesPage : UserControl
         {
             RestoreBox(cell);
             NotifyFail(cell, "請設定 OpenAI 金鑰以評分發音");
+            FlushDeferred();
             return;
         }
         _practiceBusy = true;
@@ -1465,8 +1514,6 @@ public partial class NotesPage : UserControl
         int slot = SlotIndex(e.GetPosition(EntryPanel).Y); // 顯示槽位（依 EntryPanel 子項＝目前投影序）
         // #322：槽位換成鄰卡 Id——畫面待更新（背景匯入剛插入新字而尚未重繪）時亦落在使用者瞄準的兩卡之間
         var shown = EntryPanel.Children.OfType<FrameworkElement>().Select(c => (c.Tag as NoteEntry)?.Id).ToList();
-        var beforeId = slot < shown.Count ? shown[slot] : null;                       // 插在該卡之前
-        var afterId = slot >= shown.Count && shown.Count > 0 ? shown[^1] : null;     // 末端：插在最後一張顯示卡之後
         if (!EnsureFresh()) { return; }
         f = Selected;
         if (f is null) { return; }
@@ -1479,10 +1526,7 @@ public partial class NotesPage : UserControl
         }
         var moving = f.Entries[from];
         f.Entries.RemoveAt(from);
-        int to = beforeId is not null && beforeId != eid ? f.Entries.FindIndex(x => x.Id == beforeId)
-               : afterId is not null && afterId != eid ? f.Entries.FindIndex(x => x.Id == afterId) + 1
-               : from;
-        if (to < 0) { to = from; } // 鄰卡已不在（被刪）：留在原位
+        var to = NotesPageSync.DropIndex(shown, slot, f.Entries.Select(x => x.Id).ToList(), eid, from); // 鄰卡已不在（被刪）：留在原位
         f.Entries.Insert(Math.Clamp(to, 0, f.Entries.Count), moving);
         SaveData();
         RenderFolder();

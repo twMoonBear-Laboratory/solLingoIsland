@@ -53,6 +53,7 @@ public partial class App : System.Windows.Application
     private (NotesImportEnding Ending, string Body)? _pendingImportResult; // 待開之結果（主視窗最小化／結束中時延後）
     private NotesImportResultWindow? _importResultWindow; // 同一時間至多一個
     private bool ImportRunning => _importCts is not null;
+    private bool _exitPrompting;                          // 結束確認流程進行中（防系統匣「結束」等再疊一個確認框）
     private static readonly string LogPath = Path.Combine(Path.GetTempPath(), "LingoIsland-error.log");
 
     protected override void OnStartup(StartupEventArgs e)
@@ -198,21 +199,36 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void ExitApp()
     {
-        // #322：匯入確認先於未存變更守衛（守衛選「捨棄並離開」即已還原編輯，之後才問而選「不結束」會丟編輯）
-        if (ImportRunning)
+        if (_exitPrompting) { return; } // #322：確認框開著時再點「結束」不另疊一個
+        _exitPrompting = true;
+        try
         {
-            if (!AskStopImport()) { return; }
-            _exitingDuringImport = true;
+            // #322：匯入確認先於未存變更守衛（守衛選「捨棄並離開」即已還原編輯，之後才問而選「不結束」會丟編輯）
+            if (ImportRunning)
+            {
+                if (!AskStopImport()) { return; }
+                _exitingDuringImport = true;
+            }
+            if (_main is not null && !_main.ConfirmLeaveCurrentPage())
+            {
+                _exitingDuringImport = false; // 守衛取消＝不結束：匯入照常繼續；守衛開著期間已收尾者補開結果
+                ShowPendingImportResult();
+                return;
+            }
+            _importCts?.Cancel(); // 守衛通過才取消權杖並結束（不等進行中之查詢返回；已寫入者已在磁碟）
+            _main?.AllowClose();
+            Shutdown();
         }
-        if (_main is not null && !_main.ConfirmLeaveCurrentPage())
-        {
-            _exitingDuringImport = false; // 守衛取消＝不結束：匯入照常繼續；守衛開著期間已收尾者補開結果
-            ShowPendingImportResult();
-            return;
-        }
-        _importCts?.Cancel(); // 守衛通過才取消權杖並結束（不等進行中之查詢返回；已寫入者已在磁碟）
+        finally { _exitPrompting = false; }
+    }
+
+    /// <summary>作業系統登出／關機（#322 ⑦）：無法可靠提示——不跳確認框阻擋關機，直接取消匯入（已寫入者已在磁碟）並放行主視窗關閉。</summary>
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        _exitingDuringImport = true;
+        _importCts?.Cancel();
         _main?.AllowClose();
-        Shutdown();
+        base.OnSessionEnding(e);
     }
 
     /// <summary>匯入執行中結束 app 之確認（#322 ⑦）：是＝結束（停止匯入）、否＝不結束；預設「否」。</summary>
@@ -232,6 +248,10 @@ public partial class App : System.Windows.Application
         if (!AskStopImport()) { return false; }
         _exitingDuringImport = true;
         _importCts?.Cancel();
+        // 守備：重啟若未真的結束程式（無待套用之更新、或更新器擲例外），數秒後解除結束中，補開結果、之後之匯入照常出結果
+        var guard = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        guard.Tick += (_, _) => { guard.Stop(); _exitingDuringImport = false; ShowPendingImportResult(); };
+        guard.Start();
         return true;
     }
 
@@ -466,8 +486,8 @@ public partial class App : System.Windows.Application
     private void RunNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> words)
     {
         if (words.Count == 0) { return; }
+        if (ImportRunning) { ToastNotifier.Show(NotesImport.BusyHint(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0)); return; } // 守備：同一時間至多一批（含全自備）
         if (words.All(w => w.IsOwn)) { RunOwnOnlyNotesImport(folderId, folderName, words); return; } // #321：全部自備中譯——非 AI 動作、不查詢
-        if (ImportRunning) { ToastNotifier.Show(NotesImport.BusyHint(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0)); return; } // 守備：同一時間至多一批
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
         {
             // 起跑前預檢（與字典頁「金鑰未設定時顯示明確錯誤與設定指引」同基準）：每個字都會失敗，不讓使用者等逾時
@@ -575,7 +595,12 @@ public partial class App : System.Windows.Application
 
     private static void ToastImportOutcome(NotesImportOutcome outcome, string folderName, bool ownOnly)
     {
-        if (outcome.Added == 0 && outcome.Updated == 0) { return; }
+        if (outcome.Added == 0 && outcome.Updated == 0)
+        {
+            // #322：背景匯入沒有加入任何字（全數失敗、很早就取消）也要告知結束——結果視窗不搶焦點，可能被他窗蓋住
+            if (!ownOnly) { ToastNotifier.Show($"匯入清單已結束——沒有加入任何字（{NotesImport.ResultHeader(outcome.Ending)}；詳見結果視窗）"); }
+            return;
+        }
         var shownFolder = outcome.TargetFolderMissing ? outcome.FallbackFolder : folderName;
         ToastNotifier.Show("✓ " + (outcome.Added > 0 ? $"已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") : $"已更新 {outcome.Updated} 字")
                            + (ownOnly ? "（自備中譯、未查詢" + (outcome.Failed.Count > 0 ? $"；{outcome.Failed.Count} 字失敗" : "") + "）"
