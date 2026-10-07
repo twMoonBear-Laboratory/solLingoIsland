@@ -466,7 +466,7 @@ public partial class App : System.Windows.Application
             outcome.Failed.Count > 0 ? System.Windows.MessageBoxImage.Warning : System.Windows.MessageBoxImage.Information);
         if (outcome.Added > 0 || outcome.Updated > 0)
         {
-            ToastNotifier.Show($"✓ 已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") + "（自備中譯、未查詢" + (outcome.Failed.Count > 0 ? $"；{outcome.Failed.Count} 字失敗" : "") + "）");
+            ToastNotifier.Show("✓ " + (outcome.Added > 0 ? $"已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") : $"已更新 {outcome.Updated} 字") + "（自備中譯、未查詢" + (outcome.Failed.Count > 0 ? $"；{outcome.Failed.Count} 字失敗" : "") + "）");
         }
     }
 

@@ -265,7 +265,7 @@ public static class NotesImport
     }
 
     /// <summary>
-    /// 預掃描（純函式）：對 <see cref="ParseLines"/> 之結果逐字標狀態——檔內同鍵（<see cref="NoteEntry.KeyOf"/>）只留首見、其餘
+    /// 預掃描（純函式；單一來源之 <see cref="ScanSources"/> 特例）：對 <see cref="ParseLines"/> 之結果逐字標狀態——檔內同鍵（<see cref="NoteEntry.KeyOf"/>）只留首見、其餘
     /// <see cref="NotesImportStatus.DuplicateInFile"/>；首見者再以 <paramref name="existsInNotes"/>（鍵→是否已在筆記）標
     /// <see cref="NotesImportStatus.AlreadyInNotes"/> 或 <see cref="NotesImportStatus.New"/>。空清單或逾 <see cref="MaxWords"/>（以去重後之不重複字數計）
     /// 回 <see cref="NotesImportScan.Error"/>，整檔拒收。

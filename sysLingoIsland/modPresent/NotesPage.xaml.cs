@@ -142,7 +142,7 @@ public partial class NotesPage : UserControl
     // ---- 匯入清單（spec#14／#309）----
 
     /// <summary>
-    /// 確認頁按下「查詢並加入 N 字」後觸發：(目標資料夾 Id, 目標資料夾名, 勾選之字＋自備中譯清單〔#321；自備中譯空＝線上查詢〕)。
+    /// 確認頁按下主鈕（「查詢並加入 N 字」或 #321 之「加入 N 字（…）」）後觸發：(目標資料夾 Id, 目標資料夾名, 勾選之字＋自備中譯清單〔#321；自備中譯空＝線上查詢〕)。
     /// 本頁只負責選檔→預掃描→確認（確認前零 AI 呼叫）；逐字線上查詢與寫入由 App 以 <see cref="NotesImportRunner"/> 執行後 <see cref="Reload"/>。
     /// </summary>
     public event Action<string, string, IReadOnlyList<NotesImportItem>>? ImportConfirmed;

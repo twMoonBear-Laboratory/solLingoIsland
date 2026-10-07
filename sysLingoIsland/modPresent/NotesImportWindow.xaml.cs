@@ -205,7 +205,7 @@ public partial class NotesImportWindow : Window
     {
         var force = ForceOnline;
         SummaryText.Text = NotesImport.SummaryText(_entries, _multiSource, force);
-        SummaryText.ToolTip = SummaryText.Text;
+        SummaryText.ToolTip = _hasOwn ? SummaryText.Text : null; // 無自備中譯時同 v4.18.0（不加懸停提示）
         foreach (var r in _rows)
         {
             var st = NotesImport.StatusText(r.Entry, force);

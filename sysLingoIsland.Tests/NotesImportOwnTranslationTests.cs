@@ -43,6 +43,9 @@ public class NotesImportOwnTranslationTests
     [InlineData("\"unclosed, x")]
     [InlineData("12\" ruler,尺")]
     [InlineData("  spaced  ,x")]
+    [InlineData("\"a\"b,c")]
+    [InlineData("\" a \",x")]
+    [InlineData("plain")]
     public void FirstColumn_SameAsLegacyFirstCsvField(string line)
         {
         Assert.Equal(NotesImport.LegacyFirstCsvField(line).Trim(), NotesImport.ParseEntries(line, csv: true).Single().Text); // 新解析器之第一欄＝v4.18.0 行為

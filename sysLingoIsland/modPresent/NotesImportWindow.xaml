@@ -7,7 +7,7 @@
         ResizeMode="CanResizeWithGrip"
         Background="{StaticResource PinkBg}">
   <!-- [modHmi筆記匯入確認頁]（spec#14，#309）：預掃描彙總確認表——逐列核取（新字預設勾、已在筆記預設不勾、檔內重複不可勾）、
-       全選新字／全不選、來源欄與未納入行（#320）、有自備中譯時之中譯來源欄與整批「也改查線上」（#321）、費用揭露、主鈕「查詢並加入 N 字」（N＝勾選數、0 停用）、取消（Esc 同）。確認前零 AI 呼叫。 -->
+       全選新字／全不選、來源欄與未納入行（#320）、有自備中譯時之中譯來源欄與整批「也改查線上」（#321）、費用揭露、主鈕「查詢並加入 N 字」（N＝勾選數、0 停用；#321 含自備中譯時為「加入 N 字（查詢 K 字）」／「加入 N 字（不查詢）」）、取消（Esc 同）。確認前零 AI 呼叫。 -->
   <Border Style="{StaticResource Card}" Margin="12" Padding="12">
     <Grid>
       <Grid.RowDefinitions>
