@@ -65,7 +65,7 @@ public sealed record NotesImportLoad(IReadOnlyList<NotesImportSource> Sources, I
 }
 
 /// <summary>
-/// 【匯入清單】之純函式輔助（[modPresent模組] 筆記清單匯入契約，spec#14／#309）：解析 txt／csv 第一欄、
+/// 【匯入清單】之純函式輔助（[modPresent模組] 筆記清單匯入契約，spec#14／#309）：解析 txt／csv（csv 第一欄原文、第二欄自備中譯，#321）、
 /// 去空白空行、檔內去重、對照既有筆記標狀態、各段文案。<b>純函式、不碰 UI 與網路</b>——比照 <see cref="AcquireBatch"/>
 /// 把批次流程之判斷集中於此以便單元測試；讀檔由 <see cref="ReadAllText"/> 薄接線負責、查詢與寫入由 <see cref="NotesImportRunner"/> 負責。
 /// </summary>
@@ -92,7 +92,7 @@ public static class NotesImport
     /// <summary>讀出之內容含 U+FFFD（UTF-8 解碼失敗之替代字元）即判疑似編碼不符（例如舊式 ANSI／Big5 txt）——不照查照付。</summary>
     public static bool LooksMisdecoded(string? content) => !string.IsNullOrEmpty(content) && content.IndexOf('�') >= 0;
 
-    /// <summary>副檔名是否以 CSV 規則解析（取第一欄）；其餘一律當每行一字之純文字。</summary>
+    /// <summary>副檔名是否以 CSV 規則解析（第一欄原文、第二欄自備中譯）；其餘一律當每行一字之純文字。</summary>
     public static bool IsCsv(string path)
         => string.Equals(Path.GetExtension(path), ".csv", StringComparison.OrdinalIgnoreCase);
 
@@ -217,6 +217,12 @@ public static class NotesImport
         {
             pos++;
             second = ReadField(allowLeadingSpace: true);
+            // 第三欄起不取值，但其引號欄同樣須判閉合（Excel 備註欄之儲存格內換行亦不得把殘段切成新字）
+            while (!unclosed && pos < t.Length && t[pos] == ',')
+            {
+                pos++;
+                ReadField(allowLeadingSpace: true);
+            }
         }
         return (first, second, unclosed, invalid);
     }
@@ -233,7 +239,10 @@ public static class NotesImport
     }
 
     /// <summary>取 CSV 一列之第一欄（純函式）：`"a, b",c` → `a, b`；`""` 轉義為 `"`；無引號者取至首個逗號。</summary>
-    public static string FirstCsvField(string line)
+    public static string FirstCsvField(string line) => ParseCsvFields(line ?? "", strict: false).First; // #321：與 ParseEntries 同一解析器、規則不分岔
+
+    /// <summary>v4.18.0 之第一欄取法（僅供測試比對新解析器之第一欄與舊行為等價；產品碼不呼叫）。</summary>
+    internal static string LegacyFirstCsvField(string line)
     {
         if (string.IsNullOrEmpty(line)) { return ""; }
         if (line[0] != '"')

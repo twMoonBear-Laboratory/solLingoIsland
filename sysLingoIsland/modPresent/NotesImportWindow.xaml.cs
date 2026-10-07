@@ -9,9 +9,9 @@ namespace LingoIsland.Present;
 
 /// <summary>
 /// [modHmi筆記匯入確認頁]（spec#14，#309）：預掃描後之彙總確認表。模態（<c>ShowDialog</c>、Owner＝主視窗、CenterOwner）；
-/// 每字一列（核取方塊｜原文｜狀態文字）——新字預設勾、已在筆記預設不勾可改選、檔內重複不可勾；全選新字／全不選；
-/// 費用揭露與主鈕「查詢並加入 N 字」隨勾選即時更新（N＝0 停用）。本頁**只收集勾選、不發任何查詢**；
-/// 確認後由呼叫端取 <see cref="SelectedWords"/> 交 <see cref="NotesImportRunner"/>。
+/// 每字一列（核取方塊｜原文｜來源〔#320〕｜中譯來源〔#321，有自備中譯時才有〕｜狀態文字）——新字預設勾、已在筆記預設不勾可改選、檔內重複不可勾；
+/// 全選新字／全不選；有自備中譯時整批切換「也改查線上」；費用揭露與主鈕隨勾選即時更新（N＝0 停用）。本頁**只收集勾選、不發任何查詢**；
+/// 確認後由呼叫端取 <see cref="SelectedItems"/> 交 <see cref="NotesImportRunner"/>。
 /// </summary>
 public partial class NotesImportWindow : Window
 {
@@ -59,8 +59,8 @@ public partial class NotesImportWindow : Window
             TranslationHeaderColumn.Width = new GridLength(TranslationColumnWidth);
             TranslationHeader.Visibility = Visibility.Visible;
             ForceOnlineBox.Visibility = Visibility.Visible;
-            ForceOnlineBox.Checked += (_, _) => Refresh();
-            ForceOnlineBox.Unchecked += (_, _) => Refresh();
+            ForceOnlineBox.Checked += (_, _) => { RefreshRows(); Refresh(); };
+            ForceOnlineBox.Unchecked += (_, _) => { RefreshRows(); Refresh(); };
         }
         foreach (var s in sources) { _sourcePaths[s.DisplayName] = s.Path; }
         var names = sources.Select(s => s.DisplayName).ToList();
@@ -87,6 +87,7 @@ public partial class NotesImportWindow : Window
             DialogResult = true;
         };
         CancelBtn.Click += (_, _) => { SelectedItems = Array.Empty<NotesImportItem>(); DialogResult = false; };
+        RefreshRows();
         Refresh();
     }
 
@@ -178,6 +179,17 @@ public partial class NotesImportWindow : Window
         return grid;
     }
 
+    private static readonly System.Windows.Media.SolidColorBrush OwnBrush = Frozen(0x2F, 0x6A, 0x8A);
+    private static readonly System.Windows.Media.SolidColorBrush OnlineBrush = Frozen(0x8A, 0x5A, 0x6D);
+
+    private static System.Windows.Media.SolidColorBrush Frozen(byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>勾選變動時只更新計數、主鈕與費用（O(列數)、不重寫各列；#321 起各列文案只在整批切換時重寫）。</summary>
     private void Refresh()
     {
         var force = ForceOnline;
@@ -186,7 +198,14 @@ public partial class NotesImportWindow : Window
         ConfirmBtn.Content = NotesImport.ConfirmButtonText(n, online);
         ConfirmBtn.IsEnabled = n > 0;
         CostText.Text = NotesImport.CostText(n, online);
+    }
+
+    /// <summary>各列狀態／中譯來源與計數摘要（建表時與整批切換時各一次；#321）。</summary>
+    private void RefreshRows()
+    {
+        var force = ForceOnline;
         SummaryText.Text = NotesImport.SummaryText(_entries, _multiSource, force);
+        SummaryText.ToolTip = SummaryText.Text;
         foreach (var r in _rows)
         {
             var st = NotesImport.StatusText(r.Entry, force);
@@ -197,9 +216,7 @@ public partial class NotesImportWindow : Window
             {
                 t.Text = NotesImport.TranslationSourceText(r.Entry, force);
                 t.ToolTip = t.Text.Length > 0 ? t.Text : null;
-                t.Foreground = !force && r.Entry.HasOwnTranslation
-                    ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2F, 0x6A, 0x8A))
-                    : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x8A, 0x5A, 0x6D));
+                t.Foreground = !force && r.Entry.HasOwnTranslation ? OwnBrush : OnlineBrush;
             }
         }
     }

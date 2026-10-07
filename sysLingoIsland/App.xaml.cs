@@ -461,13 +461,12 @@ public partial class App : System.Windows.Application
         _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
         System.Windows.MessageBox.Show(_main,
             NotesImport.ResultText(outcome.Added, outcome.Updated, outcome.Skipped, outcome.Failed, shownFolder, outcome.AddedWords, outcome.OwnTranslationUsed)
-            + (outcome.TargetFolderMissing ? $"\n（目標資料夾「{folderName}」已不存在，已加入的字改放到第一個資料夾「{outcome.FallbackFolder}」。）" : ""),
+            + (outcome.TargetFolderMissing ? $"\n（目標資料夾「{folderName}」已不存在" + (outcome.Added > 0 ? $"，已加入的字改放到第一個資料夾「{outcome.FallbackFolder}」。）" : "。）") : ""),
             "匯入清單", System.Windows.MessageBoxButton.OK,
             outcome.Failed.Count > 0 ? System.Windows.MessageBoxImage.Warning : System.Windows.MessageBoxImage.Information);
         if (outcome.Added > 0 || outcome.Updated > 0)
         {
-            ToastNotifier.Show($"✓ 已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") + "（自備中譯、未查詢）"
-                               + (outcome.Failed.Count > 0 ? $"（{outcome.Failed.Count} 字失敗）" : ""));
+            ToastNotifier.Show($"✓ 已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") + "（自備中譯、未查詢" + (outcome.Failed.Count > 0 ? $"；{outcome.Failed.Count} 字失敗" : "") + "）");
         }
     }
 

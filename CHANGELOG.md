@@ -11,7 +11,7 @@
   - Excel 一個儲存格裡分行寫的中譯（存成「CSV UTF-8」）會合成一行、以「；」隔開，不再把後半段當成另一個字。`.txt`（含 Anki 的 tab 分隔）與沒有第二欄的 csv，畫面與行為和以前完全一樣。
 
 ### 內部
-- 純函式 `NotesImport.ParseEntries`（第二欄解析、引號欄跨行續接與保守退回）、`ScanSources` 之中譯取捨、`ToItems`／確認頁文案三態；`NotesImportRunner` 自備中譯不呼叫查詢委派（連續者每 50 字一段批次寫入並讓出 UI 執行緒、全自備走同步 `RunOwnOnly`）、早停只計線上查詢；`NotesStore.AddOrRefreshOwnTranslationsAndSave`、`RefreshEntryByKeyAndSave(keepPhonetic)`、`SaveCount`；`App` 全自備分支不建查詢服務、不開 AI 動作頁。測試 `NotesImportOwnTranslationTests`（計數 fake，零 OpenAI 額度）；端端 UIA 腳本增走雙語 csv 之中譯來源欄、整批切換、全自備實按加入（受測 app 以無效假金鑰啟動、AI 動作頁全程未出現）。
+- 純函式 `NotesImport.ParseEntries`（第二欄解析、引號欄跨行續接與保守退回）、`ScanSources` 之中譯取捨、`ToItems`／確認頁文案三態；`NotesImportRunner` 自備中譯不呼叫查詢委派（連續者每 50 字一段批次寫入並讓出 UI 執行緒、全自備走同步 `RunOwnOnly`）、早停只計線上查詢；`NotesStore.AddOrRefreshOwnTranslationsAndSave`、`SaveCount`；`App` 全自備分支不建查詢服務、不開 AI 動作頁。測試 `NotesImportOwnTranslationTests`（計數 fake，零 OpenAI 額度）；端端 UIA 腳本增走雙語 csv 之中譯來源欄、整批切換、全自備實按加入（受測 app 以無效假金鑰啟動、AI 動作頁全程未出現）。
 
 ## [4.18.0] - 2026-10-07
 

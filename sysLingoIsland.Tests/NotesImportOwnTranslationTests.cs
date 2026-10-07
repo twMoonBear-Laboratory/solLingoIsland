@@ -44,7 +44,10 @@ public class NotesImportOwnTranslationTests
     [InlineData("12\" ruler,尺")]
     [InlineData("  spaced  ,x")]
     public void FirstColumn_SameAsLegacyFirstCsvField(string line)
-        => Assert.Equal(NotesImport.FirstCsvField(line).Trim(), NotesImport.ParseEntries(line, csv: true).Single().Text);
+        {
+        Assert.Equal(NotesImport.LegacyFirstCsvField(line).Trim(), NotesImport.ParseEntries(line, csv: true).Single().Text); // 新解析器之第一欄＝v4.18.0 行為
+        Assert.Equal(NotesImport.LegacyFirstCsvField(line), NotesImport.FirstCsvField(line));
+    }
 
     [Fact]
     public void ParseEntries_Csv_SecondColumnTrimmed_EmptyIsNone_HeaderRowSkippedWhole()
@@ -103,6 +106,13 @@ public class NotesImportOwnTranslationTests
     {
         var content = "Word,translation,note\napple,蘋果,fruit\nbanana,香蕉\n\"a, b\",c\n";
         Assert.Equal(new[] { "apple", "banana", "a, b" }, NotesImport.ParseLines(content, csv: true));
+    }
+
+    [Fact]
+    public void ParseEntries_ThirdColumnQuotedCellSpanningLines_NotSplitIntoWords()
+    {
+        var rows = NotesImport.ParseEntries("apple,蘋果,\"例句一\n例句二\"\nbanana,香蕉", csv: true);
+        Assert.Equal(new[] { ("apple", "蘋果"), ("banana", "香蕉") }, rows.Select(r => (r.Text, r.Translation)));
     }
 
     // ---- 載入與合併掃描 ----
@@ -320,6 +330,45 @@ public class NotesImportOwnTranslationTests
             Assert.Contains("筆記存檔失敗", outcome.Failed[0].Reason);
         }
         finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task RunAsync_Mixed_SegmentSaveFails_ThatSegmentFailed_OthersContinue()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"lingoisland-own-dir-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var calls = new List<string>();
+            var outcome = await new NotesImportRunner(new NotesStore(dir), Counting(calls)).RunAsync(new[]   // 路徑是資料夾：每次存檔皆失敗
+            {
+                new NotesImportItem("own1", "一"), new NotesImportItem("x1"), new NotesImportItem("own2", "二"),
+            }, "x", "", null, CancellationToken.None);
+            Assert.Equal(new[] { "x1" }, calls);                                                // 段失敗不中斷其後線上字
+            Assert.Equal(new[] { "own1", "x1", "own2" }, outcome.Failed.Select(f => f.Word));   // 其後之段照常嘗試
+            Assert.Equal(0, outcome.OwnTranslationUsed);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task RunAsync_CancelBetweenOwnSegments_WrittenSegmentKept()
+    {
+        var path = TempPath();
+        try
+        {
+            var (store, topId) = Seed(path);
+            using var cts = new CancellationTokenSource();
+            var calls = new List<string>();
+            var items = Enumerable.Range(1, 60).Select(i => new NotesImportItem($"w{i:00}", $"譯{i}")).Append(new NotesImportItem("online")).ToList();
+            var outcome = await new NotesImportRunner(store, Counting(calls)).RunAsync(items, topId, "",
+                r => { if (r.StartsWith("加入中 1–50/")) { cts.Cancel(); } }, cts.Token);           // 第一段寫入前按下取消
+            Assert.True(outcome.Cancelled);
+            Assert.Equal(50, outcome.Added);                                                    // 已寫入之段保留
+            Assert.Empty(calls);
+            Assert.Equal(50, new NotesStore(path).Load().Folders[0].Entries.Count);
+        }
+        finally { File.Delete(path); }
     }
 
     [Fact]

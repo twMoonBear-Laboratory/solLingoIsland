@@ -485,6 +485,11 @@ try {
     if (-not $confirmBtn.Current.IsEnabled) { $fails += "訴求4：有 1 字勾選但主鈕停用" }
   }
   if ($fails.Count -eq 0) { Write-Host "* [OK] 四列狀態／預設勾選／主鈕文案皆符" -ForegroundColor Green }
+  # #321 invariant：無自備中譯（txt）時不出現中譯來源欄與整批切換、版面同 v4.18.0
+  if ($null -ne (Find-ByAutomationId -Root $confirm -Id "NotesImportForceOnline")) { $fails += "#321：txt 匯入卻出現整批切換（NotesImportForceOnline）" }
+  if ($null -ne (Find-ByAutomationId -Root $confirm -Id "NotesImportRow0Translation")) { $fails += "#321：txt 匯入卻出現中譯來源欄" }
+  $cr0 = $confirm.Current.BoundingRectangle
+  Write-Host "* #321：txt 確認頁無中譯來源欄／整批切換；視窗寬 $([int]$cr0.Width)px（DPI 縮放後，記錄不判）"
 
   # 手冊證據圖＝確認頁最終態（含主視窗背景）
   Set-WindowForeground -Hwnd $confirmHwnd | Out-Null

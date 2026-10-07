@@ -39,7 +39,7 @@
                   AutomationProperties.AutomationId="NotesImportForceOnline"
                   ToolTip="勾選＝不採用 csv 第二欄的自備中譯、全部上網查（取得 AI 的音標與翻譯，會花費用）；取消勾選即恢復"/>
         <TextBlock x:Name="SummaryText" FontSize="11.5" Foreground="{StaticResource PinkSub}"
-                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                   HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="8,0,0,0"/>
       </DockPanel>
 
       <Border Grid.Row="2" BorderBrush="{StaticResource PinkAccent}" BorderThickness="1" CornerRadius="6" Background="#99FFFFFF">

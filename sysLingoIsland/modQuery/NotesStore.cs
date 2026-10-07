@@ -197,7 +197,7 @@ public sealed class NotesStore
     /// 留在原夾、不重複建立、**保留 Id／AddedAt／Color／練習分數**（字沒變、成績不歸零——與 <see cref="UpdateEntryContent"/> 之「原文已變」語意不同）；
     /// 原文採既有筆記之寫法（不以 AI 回之大小寫整形覆蓋）。找不到該鍵（他處同時刪除）回 false、不寫入。
     /// </summary>
-    public bool RefreshEntryByKeyAndSave(QueryResult r, bool keepPhonetic = false)
+    public bool RefreshEntryByKeyAndSave(QueryResult r)
     {
         var key = NoteEntry.KeyOf(r.Original);
         if (string.IsNullOrEmpty(key)) { return false; }
@@ -207,9 +207,7 @@ public sealed class NotesStore
             var i = f.Entries.FindIndex(e => e.Key == key);
             if (i >= 0)
             {
-                f.Entries[i] = keepPhonetic
-                    ? f.Entries[i] with { Translation = r.Translation }                       // #321：以自備中譯更新——只換中譯、保留原音標
-                    : f.Entries[i] with { Phonetic = r.Phonetic, Translation = r.Translation };
+                f.Entries[i] = f.Entries[i] with { Phonetic = r.Phonetic, Translation = r.Translation };
                 if (!TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
                 return true;
             }
@@ -219,8 +217,8 @@ public sealed class NotesStore
 
     /// <summary>
     /// 自備中譯之批次寫入（spec#14／#321）：**一次載入、一次存檔**——語意逐字同 <see cref="AddToFolderAndSave"/>（跨全樹去重、底色、
-    /// 目標夾不在退回第一個頂層夾、第 k 個加入者插在 <paramref name="insertAt"/>＋k）＋已在筆記者同 <see cref="RefreshEntryByKeyAndSave"/>
-    /// 之 <c>keepPhonetic</c>（只換中譯、保留音標／Id／底色／練習分數）。存檔失敗擲出 <see cref="IOException"/>、筆記檔不變（整批未落地）。
+    /// 目標夾不在退回第一個頂層夾、第 k 個加入者插在 <paramref name="insertAt"/>＋k）＋已在筆記者以自備中譯更新
+    /// （只換中譯、保留音標／Id／底色／練習分數——與 <see cref="RefreshEntryByKeyAndSave"/> 之全欄刷新不同）。存檔失敗擲出 <see cref="IOException"/>、筆記檔不變（整批未落地）。
     /// </summary>
     public IReadOnlyList<OwnTranslationWriteResult> AddOrRefreshOwnTranslationsAndSave(IReadOnlyList<QueryResult> results, string folderId, string? colorHex, DateTimeOffset now, int insertAt)
     {
