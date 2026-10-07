@@ -574,10 +574,10 @@ public static class NotesImport
     /// 批次完成後之結果表（純函式）：已加入／更新／略過／失敗計數＋逐字失敗原因。更新＝勾選之「已在筆記」字已重新查詢並刷新原筆；
     /// 略過＝加入當下已在筆記、而原筆已不存在可更新（他處同時刪除）之邊角。
     /// </summary>
-    public static string ResultText(int added, int updated, IReadOnlyList<string> skipped, IReadOnlyList<(string Word, string Reason)> failed, string folderName, IReadOnlyList<string>? addedWords = null, int ownTranslationUsed = 0)
+    public static string ResultText(int added, int updated, IReadOnlyList<string> skipped, IReadOnlyList<(string Word, string Reason)> failed, string folderName, IReadOnlyList<string>? addedWords = null, int ownTranslationUsed = 0, NotesImportEnding ending = NotesImportEnding.Completed)
     {
         var sb = new StringBuilder();
-        sb.Append($"匯入完成：已加入 {added} 字到「{folderName}」");
+        sb.Append($"{ResultHeader(ending)}：已加入 {added} 字到「{folderName}」"); // #322：首句標明結局
         if (addedWords is { Count: > 0 })
         {
             const int show = 20; // 500 字時不讓首段成一大段、把失敗清單推到最下
@@ -600,6 +600,88 @@ public static class NotesImport
         }
         return sb.ToString();
     }
+
+    // ---- #322 背景執行之文案（純函式）----
+
+    /// <summary>結果視窗標頭與結果首句（#322）：匯入完成／匯入已取消／匯入中斷（早停歸完成）。</summary>
+    public static string ResultHeader(NotesImportEnding ending) => ending switch
+    {
+        NotesImportEnding.Cancelled => "匯入已取消",
+        NotesImportEnding.Interrupted => "匯入中斷",
+        _ => "匯入完成",
+    };
+
+    /// <summary>結果視窗之視窗標題（#322）：與確認頁「匯入清單」及其他訊息框不同名。</summary>
+    public static string ResultWindowTitle(NotesImportEnding ending) => ending switch
+    {
+        NotesImportEnding.Cancelled => "匯入清單：已取消",
+        NotesImportEnding.Interrupted => "匯入清單：中斷",
+        _ => "匯入清單：完成",
+    };
+
+    /// <summary>
+    /// 結果視窗全文（#322）：<see cref="ResultText"/>（首句標明結局）＋目標夾已不存在、已取消、中斷原因之附句——背景執行與全自備兩條路共用。
+    /// </summary>
+    public static string ResultBody(NotesImportOutcome o, string folderName)
+    {
+        var shown = o.TargetFolderMissing ? o.FallbackFolder : folderName;
+        var sb = new StringBuilder(ResultText(o.Added, o.Updated, o.Skipped, o.Failed, shown, o.AddedWords, o.OwnTranslationUsed, o.Ending));
+        if (o.TargetFolderMissing)
+        {
+            sb.Append($"\n（目標資料夾「{folderName}」在匯入途中已不存在" + (o.Added > 0 ? $"，已加入的字改放到第一個資料夾「{o.FallbackFolder}」。）" : "。）"));
+        }
+        if (o.Ending == NotesImportEnding.Interrupted) { sb.Append($"\n（匯入中斷：{o.Error}——已加入的字保留，其餘未加入。）"); }
+        else if (o.Cancelled) { sb.Append("\n（已取消——已加入的字保留，其餘未加入。）"); }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 剩餘時間文案（#322）：<paramref name="onlineRemaining"/> 為 0 回空字串（不顯示）；<paramref name="eta"/> 為 null 回「剩餘時間估算中…」；
+    /// 不到 1 分鐘「約剩不到 1 分鐘」；其餘先把分鐘無條件進位得 m，m＜60「約剩 m 分鐘」、m≥60「約剩 H 小時 M 分鐘」（M＝0 時「約剩 H 小時」）。
+    /// </summary>
+    public static string RemainingText(TimeSpan? eta, int onlineRemaining)
+    {
+        if (onlineRemaining <= 0) { return ""; }
+        if (eta is null) { return "剩餘時間估算中…"; }
+        if (eta.Value < TimeSpan.FromMinutes(1)) { return "約剩不到 1 分鐘"; }
+        var m = (int)Math.Ceiling(eta.Value.TotalMinutes - 1e-9);
+        if (m < 60) { return $"約剩 {m} 分鐘"; }
+        return m % 60 == 0 ? $"約剩 {m / 60} 小時" : $"約剩 {m / 60} 小時 {m % 60} 分鐘";
+    }
+
+    /// <summary>匯入進度列之文字（#322）。</summary>
+    public static string ProgressText(string folderPath, NotesImportProgress p, bool cancelling)
+    {
+        if (cancelling) { return $"正在取消匯入到「{folderPath}」…（已完成 {p.Done}／{p.Total}；已加入的字會保留）"; }
+        var sb = new StringBuilder($"正在匯入到「{folderPath}」：已完成 {p.Done}／{p.Total}");
+        if (p.Current.Length > 0) { sb.Append($"（查詢中：{p.Current}）"); }
+        var rt = RemainingText(p.Remaining, p.OnlineRemaining);
+        if (rt.Length > 0) { sb.Append(p.Current.Length > 0 ? "· " : " · ").Append(rt); } // 全形括號後不另空格
+        return sb.ToString();
+    }
+
+    /// <summary>匯入執行中再按「匯入清單」或拖入檔案時之提示（#322）。</summary>
+    public static string BusyHint(int done, int total)
+        => $"已有一批匯入正在進行（已完成 {done}／{total}）——請等它完成，或按主視窗下方進度列的「取消」後再匯入。";
+
+    /// <summary>備份還原進行中時匯入清單之提示（#322）。</summary>
+    public const string RestoreBusyHint = "正在匯入備份資料，完成後程式會關閉，請重新開啟後再匯入清單。";
+
+    /// <summary>匯入執行中「匯入資料…」（備份還原）之提示（#322）。</summary>
+    public static string RestoreBlockedText(int done, int total)
+        => $"匯入清單還在進行（已完成 {done}／{total}）——請等它完成或先取消，再匯入資料。";
+
+    /// <summary>結束 app 確認框之 Title 與文案（#322）。</summary>
+    public const string ExitConfirmTitle = "匯入進行中";
+
+    public static string ExitConfirmText(int done, int total)
+        => $"匯入清單還在進行（已完成 {done}／{total}）。\n\n現在結束 LingoIsland 會停止匯入：已加入的字會保留，其餘不會加入。\n\n確定要結束嗎？";
+
+    /// <summary>主視窗最小化時匯入結束之 toast（#322）。</summary>
+    public const string FinishedWhileHiddenToast = "匯入清單已結束——打開主視窗看結果";
+
+    /// <summary>筆記頁暫時讀不到筆記檔時之 toast（#322）。</summary>
+    public const string SyncReadFailedToast = "暫時讀不到筆記檔（可能被其他程式鎖住），這次變更未儲存，請稍後再試";
 
     /// <summary>單字或片語之查詢路徑（純函式，與字典頁手動查詢同規則）：單一 token（無空白）→查字義；含空白→整句翻譯。</summary>
     public static bool IsSingleWord(string text) => text.Length > 0 && !text.Any(char.IsWhiteSpace);

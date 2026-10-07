@@ -14,6 +14,9 @@ public partial class AboutPage : UserControl
 {
     private readonly UpdateService? _updates;
 
+    /// <summary>「重啟以更新」前之確認（#322；App 注入）：匯入清單背景執行中即問是否停止匯入，回 false＝不重啟。</summary>
+    public Func<bool>? ConfirmRestart { get; set; }
+
     public AboutPage(UpdateService? updates = null)
     {
         InitializeComponent();
@@ -32,7 +35,7 @@ public partial class AboutPage : UserControl
         }
         UpdatePanel.Visibility = Visibility.Visible;
         CheckUpdateBtn.Click += async (_, _) => await CheckAsync();
-        RestartUpdateBtn.Click += (_, _) => _updates.RestartToApply();
+        RestartUpdateBtn.Click += (_, _) => { if (ConfirmRestart?.Invoke() ?? true) { _updates.RestartToApply(); } }; // #322：匯入清單進行中先確認
         _updates.UpdateReady += v => Dispatcher.BeginInvoke(() => ShowReady(v));
         // #122：下載階段回饋（與「確認中」區分）——事件於背景執行緒觸發，切 Dispatcher 更新 UI
         _updates.DownloadStarted += () => Dispatcher.BeginInvoke(() => UpdateStatusText.Text = AppStatusText.UpdateDownloading);

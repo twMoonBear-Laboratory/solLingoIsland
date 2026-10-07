@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="500" viewBox="0 0 820 500" font-family="Segoe UI, Microsoft JhengHei, PingFang TC, system-ui, sans-serif">
+  <!-- [modHmi匯入結果視窗]：NotesImportResultWindow（Title「匯入清單：已取消」等三態、非模態 Show、ShowActivated=false、Owner＝主視窗、CenterOwner、480×380 可調）。spec#14／#322：背景匯入結束（完成／取消／中斷）或全自備中譯寫入後開出；內容＝既有 NotesImport.ResultText，與 v4.19.0 結果表同文。設計期參考稿、以文字為準。 -->
+  <rect width="820" height="500" fill="#FFF0F5"/>
+
+  <!-- owner 主視窗（非模態：仍可操作，不淡化） -->
+  <rect x="0" y="0" width="820" height="26" fill="#F4C2D0"/>
+  <text x="10" y="18" font-size="12" font-weight="600" fill="#5C3346">LingoIsland</text>
+  <rect x="0" y="26" width="820" height="52" fill="#FBE4EC"/>
+  <text x="20" y="58" font-size="12" fill="#8A5A6D">主題　擷取　影片　電子書　筆記　歷史　選項　關於</text>
+  <rect x="10" y="88" width="800" height="368" rx="8" fill="#FFFFFF" stroke="#F4C2D0"/>
+  <rect x="0" y="464" width="820" height="36" fill="#FBE4EC"/>
+  <text x="12" y="487" font-size="12" fill="#2E7D46">● 已設定 OpenAI 金鑰</text>
+
+  <!-- 結果視窗 -->
+  <rect x="170" y="70" width="480" height="380" rx="8" fill="#FFF0F5" stroke="#B0578D" stroke-width="1.5"/>
+  <rect x="170" y="70" width="480" height="28" rx="8" fill="#F4C2D0"/>
+  <text x="182" y="89" font-size="12" font-weight="600" fill="#5C3346">匯入清單：已取消</text>
+  <text x="630" y="89" font-size="12" fill="#5C3346">✕</text>
+  <rect x="182" y="108" width="456" height="330" rx="8" fill="#FFFFFF" stroke="#F4C2D0"/>
+  <text x="196" y="132" font-size="14" font-weight="600" fill="#B0578D">匯入已取消</text>
+  <!-- NotesImportResultText：唯讀、可捲、可選取複製 -->
+  <rect x="196" y="144" width="428" height="236" rx="4" fill="#FFF7FA" stroke="#F4C2D0"/>
+  <text x="206" y="166" font-size="12.5" fill="#3A2C33">匯入已取消：已加入 37 字到「英文課 › Unit 4」</text>
+  <text x="206" y="184" font-size="12.5" fill="#3A2C33">（orbit、comet、nebula、galaxy … 等 37 字）、失敗 2 字。</text>
+  <text x="206" y="210" font-size="12.5" fill="#3A2C33">失敗（其餘字不受影響；可再匯入一次只勾這幾個）：</text>
+  <text x="206" y="228" font-size="12.5" fill="#3A2C33">· quasar——查詢逾時</text>
+  <text x="206" y="246" font-size="12.5" fill="#3A2C33">· pulsar——查詢沒有回傳內容</text>
+  <text x="206" y="272" font-size="12.5" fill="#3A2C33">（已取消——已加入的字保留，其餘未加入。）</text>
+  <rect x="616" y="148" width="5" height="60" rx="2" fill="#E4B7C6"/>
+  <!-- 確定（NotesImportResultOk） -->
+  <rect x="546" y="398" width="78" height="28" rx="6" fill="#F4C2D0"/>
+  <text x="572" y="417" font-size="12.5" font-weight="600" fill="#6D3A4D">確定</text>
+</svg>

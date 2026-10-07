@@ -43,6 +43,17 @@ public partial class App : System.Windows.Application
     private readonly EbookStore _ebookStore = new();           // #229：電子書書櫃（spec#5/#6；比照 VideoStore）
     private readonly INotificationService _notify = new WinToastNotificationService(); // 發音回饋系統通知（#101）
     private UpdateService? _updates;
+
+    // ---- #322 筆記清單匯入之背景執行（契約「背景執行」）----
+    private CancellationTokenSource? _importCts;          // 非 null＝匯入執行中（同一時間至多一批）
+    private NotesImportProgress? _importProgress;         // 最近一則進度
+    private string _importFolderPath = "";                // 確認當下之目標夾路徑（匯入途中改夾名不追改）
+    private bool _importCancelling;                       // 已按「取消」、等執行器返回
+    private bool _exitingDuringImport;                    // 結束確認選「是」後之結束中（收尾不開結果視窗、不 toast）
+    private (NotesImportEnding Ending, string Body)? _pendingImportResult; // 待開之結果（主視窗最小化／結束中時延後）
+    private NotesImportResultWindow? _importResultWindow; // 同一時間至多一個
+    private bool ImportRunning => _importCts is not null;
+    private bool _exitPrompting;                          // 結束確認流程進行中（防系統匣「結束」等再疊一個確認框）
     private static readonly string LogPath = Path.Combine(Path.GetTempPath(), "LingoIsland-error.log");
 
     protected override void OnStartup(StartupEventArgs e)
@@ -100,6 +111,8 @@ public partial class App : System.Windows.Application
         _notesPage.ViewRequested += entry => ShowDetail(entry.ToResult());
         _notesPage.EntryEditRequested += (id, text) => _ = EditNoteEntryAsync(id, text); // 複查回饋：筆記編輯→重譯
         _notesPage.ImportConfirmed += RunNotesImport; // spec#14／#309：確認頁勾選之清單→逐字既有查詢→寫入目前選取夾
+        _notesPage.ImportBlockedReason = () => ImportRunning ? NotesImport.BusyHint(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0)
+                                             : _optionsPage?.RestoreRunning == true ? NotesImport.RestoreBusyHint : null; // #322：重入與還原互斥
         _historyPage = new HistoryPage(_historyStore, () => _speech);
         _historyPage.ViewRequested += entry => ShowDetail(entry.ToResult());
         _historyPage.EntryEditRequested += (id, text) => _ = EditHistoryEntryAsync(id, text); // 複查回饋：歷史編輯→重譯
@@ -107,6 +120,7 @@ public partial class App : System.Windows.Application
             AddToNotes(new NoteAddRequest(entry.ToResult(), NoteDefaults.FolderName, NoteDefaults.ColorHex));
         _optionsPage = new OptionsPage(_config);
         _optionsPage.SettingsChanged += ApplySettings;
+        _optionsPage.RestoreBlockedReason = () => ImportRunning ? NotesImport.RestoreBlockedText(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0) : null; // #322
         // 指定快捷鍵監聽期間暫停全域熱鍵、結束後依現行組態恢復（Issue #89）：
         // 避免監聽中按下現行鍵誤觸喚起，並使鍵盤組合不被 RegisterHotKey 攔截吞鍵而得正確擷取。
         _listenGuard = new HotkeyListenGuard(
@@ -154,7 +168,11 @@ public partial class App : System.Windows.Application
         _ebookPage.AddSpeakerNotesRequested += AddSpeakerNotesToFolder;      // 某說話人全書段落原文→〔書名-說話人〕資料夾（App 端確認費用後逐句翻譯）
 
         // spec#12（#290）：主題存放區一併注入主視窗——主題變更之訂閱與派送只有主視窗一個落點，消費頁不自行訂閱。
-        _main = new MainWindow(_themePage, _capturePage, _videoPage, _ebookPage, _notesPage, _historyPage, _optionsPage, new AboutPage(_updates), _themeStore);
+        var aboutPage = new AboutPage(_updates) { ConfirmRestart = ConfirmRestartDuringImport }; // #322：重啟以更新亦先過匯入確認
+        _main = new MainWindow(_themePage, _capturePage, _videoPage, _ebookPage, _notesPage, _historyPage, _optionsPage, aboutPage, _themeStore);
+        _main.ImportCancelRequested += CancelBackgroundImport;           // #322：進度列「取消」
+        _main.StateChanged += (_, _) => ShowPendingImportResult();      // #322：最小化時延後之結果視窗於還原時開
+        _main.IsVisibleChanged += (_, _) => ShowPendingImportResult();
         _main.RefreshStatus(keyReady, HotkeyDisplay());
         _main.ResultRequested += SummonResult; // 功能列「Dictionary」鈕→喚出獨立字典視窗（v1.0.1 恢復）
         _main.ExitRequested += ExitApp;        // 主視窗關閉(✕)→結束整個程式（v1.0.1：移除原「關閉＝收合」防關閉行為，USR 回饋）
@@ -181,9 +199,64 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void ExitApp()
     {
-        if (_main is not null && !_main.ConfirmLeaveCurrentPage()) { return; }
+        if (_exitPrompting) { return; } // #322：確認框開著時再點「結束」不另疊一個
+        _exitPrompting = true;
+        try
+        {
+            // #322：匯入確認先於未存變更守衛（守衛選「捨棄並離開」即已還原編輯，之後才問而選「不結束」會丟編輯）
+            if (ImportRunning)
+            {
+                if (!AskStopImport()) { return; }
+                _exitingDuringImport = true;
+            }
+            if (_main is not null && !_main.ConfirmLeaveCurrentPage())
+            {
+                _exitingDuringImport = false; // 守衛取消＝不結束：匯入照常繼續；守衛開著期間已收尾者補開結果
+                ShowPendingImportResult();
+                return;
+            }
+            _importCts?.Cancel(); // 守衛通過才取消權杖並結束（不等進行中之查詢返回；已寫入者已在磁碟）
+            _main?.AllowClose();
+            Shutdown();
+        }
+        finally { _exitPrompting = false; }
+    }
+
+    /// <summary>作業系統登出／關機（#322 ⑦）：無法可靠提示——不跳確認框阻擋關機，直接取消匯入（已寫入者已在磁碟）並放行主視窗關閉。</summary>
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        _exitingDuringImport = true;
+        _importCts?.Cancel();
         _main?.AllowClose();
-        Shutdown();
+        base.OnSessionEnding(e);
+    }
+
+    /// <summary>匯入執行中結束 app 之確認（#322 ⑦）：是＝結束（停止匯入）、否＝不結束；預設「否」。</summary>
+    private bool AskStopImport()
+    {
+        var text = NotesImport.ExitConfirmText(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0);
+        // 主視窗最小化或隱藏時（系統匣「結束」常見）不以它為 owner——owner 最小化之訊息框可能不顯示；改為無 owner 且置於桌面最上層
+        var r = MainShowing()
+            ? System.Windows.MessageBox.Show(_main!, text, NotesImport.ExitConfirmTitle, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No)
+            : System.Windows.MessageBox.Show(text, NotesImport.ExitConfirmTitle, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No, System.Windows.MessageBoxOptions.DefaultDesktopOnly);
+        return r == System.Windows.MessageBoxResult.Yes;
+    }
+
+    /// <summary>關於頁「重啟以更新」之前（#322 ⑦）：匯入執行中即確認；是＝取消匯入並重啟（該路徑現行無未存變更守衛、不新增）。</summary>
+    private bool ConfirmRestartDuringImport()
+    {
+        if (!ImportRunning) { return true; }
+        if (_exitPrompting) { return false; } // 結束確認同一時間只一個
+        _exitPrompting = true;
+        try { if (!AskStopImport()) { return false; } }
+        finally { _exitPrompting = false; }
+        _exitingDuringImport = true;
+        _importCts?.Cancel();
+        // 守備：重啟若未真的結束程式（無待套用之更新、或更新器擲例外），數秒後解除結束中，補開結果、之後之匯入照常出結果
+        var guard = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        guard.Tick += (_, _) => { guard.Stop(); _exitingDuringImport = false; ShowPendingImportResult(); };
+        guard.Start();
+        return true;
     }
 
     private void RegisterHotkeyOrWarn()
@@ -396,7 +469,7 @@ public partial class App : System.Windows.Application
                     var r = await query.QueryTextAsync(fresh[i], ct);
                     if (_notesStore.AddToNamedFolderAndSave(r, folder, NoteDefaults.ColorHex, DateTimeOffset.Now) == NoteAddResult.Added) { added++; }
                 }
-                catch (QueryException) { failed++; }
+                catch (Exception ex) when (ex is QueryException or IOException) { failed++; } // #322：筆記檔讀失敗亦計失敗、不洗掉筆記
             }
             report($"完成——已加入 {added}" + (failed > 0 ? $"，{failed} 句失敗" : ""));
             return null; // 無 token 用量回傳→不顯費用（前置對話框已提醒）
@@ -410,13 +483,14 @@ public partial class App : System.Windows.Application
     private static string Ellipsis(string s, int max) => s.Length <= max ? s : s[..max].TrimEnd() + "…";
 
     /// <summary>
-    /// 匯入清單之批次執行（spec#14／#309）：確認頁已揭露費用、此處不再問；以 <see cref="AiActionWindow"/> 逐字顯示進度可取消、
-    /// <see cref="NotesImportRunner"/> 接既有 <see cref="QueryService"/>（單字查字義／片語整句翻譯，與字典頁手動查詢同規則）
-    /// 寫入目前選取夾（含子夾）一字一存；結束顯示結果表（成功／略過／失敗逐字原因）、重載筆記頁與字典「加入至」下拉。
+    /// 匯入清單之批次執行（spec#14／#309；#322 起非模態背景執行）：確認頁已揭露費用、此處不再問；全部自備中譯者同步瞬間寫入（#321）；
+    /// 其餘以 <see cref="NotesImportRunner"/> 接既有 <see cref="QueryService"/>（或測試縫之延遲假查詢）於 UI 執行緒 async 執行（不 <c>Task.Run</c>）、
+    /// 主視窗 [modHmi匯入進度列] 顯示進度與剩餘時間、可取消；本方法啟動後即返回（<c>ImportConfirmed</c> 不等執行結束）。
     /// </summary>
     private void RunNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> words)
     {
         if (words.Count == 0) { return; }
+        if (ImportRunning) { ToastNotifier.Show(NotesImport.BusyHint(_importProgress?.Done ?? 0, _importProgress?.Total ?? 0)); return; } // 守備：同一時間至多一批（含全自備）
         if (words.All(w => w.IsOwn)) { RunOwnOnlyNotesImport(folderId, folderName, words); return; } // #321：全部自備中譯——非 AI 動作、不查詢
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
         {
@@ -425,49 +499,131 @@ public partial class App : System.Windows.Application
                 "匯入清單", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
-        var query = new QueryService(_config.Model, _config.TimeoutSec, _config.MaxRetries);
-        var runner = new NotesImportRunner(_notesStore, NotesImportRunner.MakeLookup(query));
-        NotesImportOutcome? outcome = null;
-        AiActionWindow.RunAndShow(_main, $"正在匯入 {words.Count} 字到「{folderName}」", async (report, ct) =>
-        {
-            outcome = await runner.RunAsync(words, folderId, NoteDefaults.ColorHex, report, ct);
-            var shownFolder = outcome.TargetFolderMissing ? outcome.FallbackFolder : folderName;
-            report(NotesImport.ResultText(outcome.Added, outcome.Updated, outcome.Skipped, outcome.Failed, shownFolder, outcome.AddedWords, outcome.OwnTranslationUsed)
-                   + (outcome.TargetFolderMissing ? $"\n（目標資料夾「{folderName}」在匯入途中已不存在" + (outcome.Added > 0 ? $"，已加入的字改放到第一個資料夾「{outcome.FallbackFolder}」。）" : "。）") : "")
-                   + (outcome.Cancelled ? "\n（已取消——已加入的字保留，其餘未加入。）" : ""));
-            return null; // 費用已於確認頁前置揭露；不顯用量
-        }, autoCloseOnSuccess: false, showCost: false);
+        // #322 測試縫：LINGOISLAND_IMPORT_FAKE_LOOKUP_MS 為 1–60000 之整數時以延遲假查詢取代線上查詢（端端測試用；零網路、零額度）
+        var fakeMs = NotesImportRunner.FakeLookupDelayMs(Environment.GetEnvironmentVariable(NotesImportRunner.FakeLookupEnvVar));
+        var lookup = fakeMs is int ms
+            ? NotesImportRunner.MakeFakeLookup(ms)
+            : NotesImportRunner.MakeLookup(new QueryService(_config.Model, _config.TimeoutSec, _config.MaxRetries));
+        var runner = new NotesImportRunner(_notesStore, lookup);
+        _ = RunBackgroundImportAsync(runner, folderId, folderName, words);
+    }
 
-        _notesPage?.Reload();
-        _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
-        if (outcome is not null && (outcome.Added > 0 || outcome.Updated > 0))
+    /// <summary>背景執行之本體（#322）：設匯入執行中→進度列→await 執行器（同步進度回呼內同步筆記頁）→收尾。</summary>
+    private async Task RunBackgroundImportAsync(NotesImportRunner runner, string folderId, string folderName, IReadOnlyList<NotesImportItem> words)
+    {
+        var cts = new CancellationTokenSource();
+        _importCts = cts;
+        _importCancelling = false;
+        _importFolderPath = folderName;
+        _importProgress = new NotesImportProgress(0, words.Count, "", words.Count(w => !w.IsOwn), null, Wrote: false);
+        UpdateImportProgress();
+        NotesImportOutcome outcome;
+        try
         {
-            var shownFolder = outcome.TargetFolderMissing ? outcome.FallbackFolder : folderName;
-            ToastNotifier.Show("✓ " + (outcome.Added > 0 ? $"已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") : $"已更新 {outcome.Updated} 字")
-                               + (outcome.Failed.Count > 0 ? $"（{outcome.Failed.Count} 字失敗）" : ""));
+            outcome = await runner.RunAsync(words, folderId, NoteDefaults.ColorHex, report: null, cts.Token, progress: OnImportProgress);
+        }
+        catch (Exception ex) // 守備：執行器本身不往外擲（中斷以 Error 回傳）
+        {
+            outcome = new NotesImportOutcome(0, 0, Array.Empty<string>(), Array.Empty<(string, string)>()) { Error = ex.Message };
+        }
+        finally
+        {
+            _importCts = null; // 先解除再 Dispose：之後之 Cancel 呼叫皆落空
+            cts.Dispose();
+        }
+        try { FinishBackgroundImport(outcome, folderName); }
+        catch (Exception ex)
+        {
+            try { File.WriteAllText(LogPath, DateTime.Now + "\n" + ex); } catch { /* log 寫入失敗不致命 */ }
+            ToastNotifier.Show("匯入收尾發生錯誤：" + ex.Message);
         }
     }
 
     /// <summary>
-    /// 匯入清單之全自備中譯分支（spec#14／#321）：勾選之字全部帶 csv 第二欄自備中譯——不檢金鑰、不建查詢服務、不開 AI 動作進度頁
-    /// （那是付費 AI 動作之 surface）；執行器以「被呼叫即擲例外」之守衛委派建構、同步一次載入一次存檔，結果以訊息框呈現。
+    /// 執行器之同步進度回呼（#322 ②）：每次寫入後於下一個 await 之前被呼叫——先同步筆記頁（換新記憶體資料），再更新進度列；
+    /// 寫入與筆記頁同步之間不會插入任何 UI 事件（不得改用 <c>IProgress&lt;T&gt;</c>）。
+    /// </summary>
+    private void OnImportProgress(NotesImportProgress p)
+    {
+        if (p.Wrote) { _notesPage?.SyncAfterImportWrite(); }
+        _importProgress = p;
+        UpdateImportProgress();
+    }
+
+    private void UpdateImportProgress()
+    {
+        if (_importProgress is not { } p) { return; }
+        _main?.ShowImportProgress(NotesImport.ProgressText(_importFolderPath, p, _importCancelling), p.Done, p.Total, _importCancelling);
+    }
+
+    /// <summary>進度列「取消」（#322 ④）：取消權杖——進行中之查詢中止且該字不寫入，已寫入者保留；按下即停用「取消」。</summary>
+    private void CancelBackgroundImport()
+    {
+        if (_importCts is not { } cts) { return; }
+        _importCancelling = true;
+        cts.Cancel();
+        UpdateImportProgress();
+    }
+
+    /// <summary>收尾（#322 ⑧）：隱藏進度列、同步筆記頁（不整頁重載）、重填字典下拉、toast、開結果視窗（主視窗最小化或結束中時延後）。</summary>
+    private void FinishBackgroundImport(NotesImportOutcome outcome, string folderName)
+    {
+        _importCancelling = false;
+        _main?.HideImportProgress();
+        _notesPage?.FinishBackgroundImport();
+        _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
+        _pendingImportResult = (outcome.Ending, NotesImport.ResultBody(outcome, folderName));
+        if (_exitingDuringImport) { return; } // 結束中：不開結果視窗、不 toast（守衛取消時於 ExitApp 補開）
+        if (!MainShowing())
+        {
+            ToastNotifier.Show(NotesImport.FinishedWhileHiddenToast); // 只出一則，不另出平時之 toast
+            return;
+        }
+        ToastImportOutcome(outcome, folderName, ownOnly: false);
+        ShowPendingImportResult();
+    }
+
+    private bool MainShowing() => _main is { IsVisible: true } m && m.WindowState != WindowState.Minimized;
+
+    /// <summary>開待開之結果視窗（#322）：主視窗可見且非最小化、非結束中才開；不搶焦點；同一時間至多一個（先關舊的）。</summary>
+    private void ShowPendingImportResult()
+    {
+        if (_pendingImportResult is not { } r || _exitingDuringImport || !MainShowing()) { return; }
+        _pendingImportResult = null;
+        _importResultWindow?.Close();
+        var win = new NotesImportResultWindow(r.Ending, r.Body) { Owner = _main };
+        win.Closed += (_, _) => { if (ReferenceEquals(_importResultWindow, win)) { _importResultWindow = null; } };
+        _importResultWindow = win;
+        win.Show();
+    }
+
+    private static void ToastImportOutcome(NotesImportOutcome outcome, string folderName, bool ownOnly)
+    {
+        if (outcome.Added == 0 && outcome.Updated == 0)
+        {
+            // #322：背景匯入沒有加入任何字（全數失敗、很早就取消）也要告知結束——結果視窗不搶焦點，可能被他窗蓋住
+            if (!ownOnly) { ToastNotifier.Show($"匯入清單已結束——沒有加入任何字（{NotesImport.ResultHeader(outcome.Ending)}；詳見結果視窗）"); }
+            return;
+        }
+        var shownFolder = outcome.TargetFolderMissing ? outcome.FallbackFolder : folderName;
+        ToastNotifier.Show("✓ " + (outcome.Added > 0 ? $"已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") : $"已更新 {outcome.Updated} 字")
+                           + (ownOnly ? "（自備中譯、未查詢" + (outcome.Failed.Count > 0 ? $"；{outcome.Failed.Count} 字失敗" : "") + "）"
+                                      : (outcome.Failed.Count > 0 ? $"（{outcome.Failed.Count} 字失敗）" : "")));
+    }
+
+    /// <summary>
+    /// 匯入清單之全自備中譯分支（spec#14／#321）：勾選之字全部帶 csv 第二欄自備中譯——不檢金鑰、不建查詢服務、不開進度列
+    /// （非 AI 動作）；執行器以「被呼叫即擲例外」之守衛委派建構、同步一次載入一次存檔；結果以 [modHmi匯入結果視窗] 呈現（#322，取代 <c>MessageBox</c>）。
     /// </summary>
     private void RunOwnOnlyNotesImport(string folderId, string folderName, IReadOnlyList<NotesImportItem> items)
     {
         var runner = new NotesImportRunner(_notesStore, NotesImportRunner.NoLookup);
         var outcome = runner.RunOwnOnly(items, folderId, NoteDefaults.ColorHex);
-        var shownFolder = outcome.TargetFolderMissing ? outcome.FallbackFolder : folderName;
         _notesPage?.Reload();
         _dictionaryWindow?.Page.SetNoteTargets(TopFolderNames(), ActiveThemeName());
-        System.Windows.MessageBox.Show(_main,
-            NotesImport.ResultText(outcome.Added, outcome.Updated, outcome.Skipped, outcome.Failed, shownFolder, outcome.AddedWords, outcome.OwnTranslationUsed)
-            + (outcome.TargetFolderMissing ? $"\n（目標資料夾「{folderName}」已不存在" + (outcome.Added > 0 ? $"，已加入的字改放到第一個資料夾「{outcome.FallbackFolder}」。）" : "。）") : ""),
-            "匯入清單", System.Windows.MessageBoxButton.OK,
-            outcome.Failed.Count > 0 ? System.Windows.MessageBoxImage.Warning : System.Windows.MessageBoxImage.Information);
-        if (outcome.Added > 0 || outcome.Updated > 0)
-        {
-            ToastNotifier.Show("✓ " + (outcome.Added > 0 ? $"已匯入 {outcome.Added} 字到「{shownFolder}」" + (outcome.Updated > 0 ? $"、更新 {outcome.Updated} 字" : "") : $"已更新 {outcome.Updated} 字") + "（自備中譯、未查詢" + (outcome.Failed.Count > 0 ? $"；{outcome.Failed.Count} 字失敗" : "") + "）");
-        }
+        _pendingImportResult = (outcome.Ending, NotesImport.ResultBody(outcome, folderName));
+        ToastImportOutcome(outcome, folderName, ownOnly: true);
+        ShowPendingImportResult();
     }
 
     /// <summary>編輯筆記條目原文後重譯（複查回饋）：文字重查→更新該筆三欄（練習分數歸零）、存檔並重載筆記頁。空字串/失敗以 toast。</summary>
@@ -483,13 +639,13 @@ public partial class App : System.Windows.Application
         {
             var query = new QueryService(_config.Model, _config.TimeoutSec, _config.MaxRetries);
             var result = await query.QueryTextAsync(t);
-            var data = _notesStore.LoadEnsured();
+            var data = _notesStore.LoadStrict(); // #322：讀失敗擲出、不以空結構寫回
             if (NotesStore.UpdateEntryContent(data, id, result))
             {
                 _notesStore.Save(data);
             }
         }
-        catch (QueryException ex)
+        catch (Exception ex) when (ex is QueryException or IOException)
         {
             ToastNotifier.Show("重新翻譯失敗：" + ex.Message);
         }
@@ -591,7 +747,10 @@ public partial class App : System.Windows.Application
     private void AddToNotes(NoteAddRequest req)
     {
         var folder = ResolveFolderName(req.FolderName);
-        var msg = _notesStore.AddToNamedFolderAndSave(req.Result, folder, req.ColorHex, DateTimeOffset.Now) switch
+        NoteAddResult added;
+        try { added = _notesStore.AddToNamedFolderAndSave(req.Result, folder, req.ColorHex, DateTimeOffset.Now); }
+        catch (IOException ex) { ToastNotifier.Show("加入筆記失敗：" + ex.Message); return; } // #322：讀檔嚴格，不以空結構寫回
+        var msg = added switch
         {
             NoteAddResult.Added => folder == NotesStore.DefaultFolderName ? "✓ 已加入我的筆記" : $"✓ 已加入「{folder}」",
             NoteAddResult.AlreadyExists => "已在筆記中",

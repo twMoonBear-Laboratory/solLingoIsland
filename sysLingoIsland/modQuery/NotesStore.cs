@@ -50,6 +50,13 @@ public enum NoteAddResult { Added, AlreadyExists, Empty }
 /// <summary>自備中譯批次寫入之逐字結果（spec#14／#321）：加入新筆、以自備中譯更新既有筆（只換中譯）、或原文為空。</summary>
 public enum OwnTranslationWriteResult { Added, Updated, Empty }
 
+/// <summary>筆記檔內容損毀（無法解析，#322）：與「暫時讀不到（被鎖）」區分——重試不會好，須明訊並指引自備份還原。</summary>
+public sealed class NotesFileCorruptException : IOException
+{
+    public NotesFileCorruptException(Exception inner)
+        : base("筆記檔內容已損毀、無法讀取——請到「選項」分頁「資料備份與搬遷」以「匯入資料…」還原備份", inner) { }
+}
+
 /// <summary>
 /// 我的筆記本機儲存（[modQuery模組] 我的筆記儲存契約，spec#7；Issue #34 樹化）。存
 /// <c>%APPDATA%\LingoIsland\notes.json</c>。資料夾為**多層樹**（向後相容舊平面）；加入以英文原文正規化
@@ -89,6 +96,34 @@ public sealed class NotesStore
         return d;
     }
 
+    /// <summary>
+    /// 嚴格讀檔（#322）：檔不存在＝新結構（首次使用）；檔存在而讀取或解析失敗（例如被防毒、雲端同步軟體暫時鎖住）即擲 <see cref="IOException"/>——
+    /// 供一切「載入→改→存」寫入路徑與筆記頁同步使用，不得以空結構寫回而洗掉整份筆記（<see cref="Load"/> 之退空降級只留給程式啟動之首次載入）。
+    /// </summary>
+    public NotesData LoadStrict()
+    {
+        if (!File.Exists(_path)) { var empty = new NotesData(); Ensure(empty); return empty; }
+        string text;
+        try { text = File.ReadAllText(_path); }
+        catch (Exception ex) { throw new IOException("讀取筆記檔失敗：" + ex.Message, ex); } // 多為被防毒／雲端同步暫時鎖住：稍後重試可恢復
+        NotesData? d;
+        try { d = JsonSerializer.Deserialize<NotesData>(text); }
+        catch (Exception ex) { throw new NotesFileCorruptException(ex); } // 內容損毀：重試不會好，須明訊並指引還原
+        d ??= new NotesData();
+        Ensure(d);
+        return d;
+    }
+
+    /// <summary><see cref="LoadStrict"/> 之不擲例外版：失敗回 false 與白話原因（#322 筆記頁同步用）。</summary>
+    public bool TryLoadStrict(out NotesData data, out string error) => TryLoadStrict(out data, out error, out _);
+
+    /// <summary>同上，另回 <paramref name="corrupt"/>：true＝內容損毀（重試不會好），false＝暫時讀不到（多為被鎖，稍後可恢復）。</summary>
+    public bool TryLoadStrict(out NotesData data, out string error, out bool corrupt)
+    {
+        try { data = LoadStrict(); error = ""; corrupt = false; return true; }
+        catch (IOException ex) { data = new NotesData(); error = ex.Message; corrupt = ex is NotesFileCorruptException; return false; }
+    }
+
     public static void Ensure(NotesData d)
     {
         if (d.Folders.Count == 0)
@@ -104,16 +139,24 @@ public sealed class NotesStore
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path, JsonSerializer.Serialize(d, Opts));
+            WriteAtomic(JsonSerializer.Serialize(d, Opts));
             SaveCount++;
         }
         catch { /* 寫入失敗不影響主流程 */ }
     }
 
+    /// <summary>原子寫入（#322）：先寫同目錄暫存檔再以覆蓋式搬移取代——中途斷電或被中止不留半份 JSON（背景匯入每字一存，寫入次數大增）。</summary>
+    private void WriteAtomic(string json)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        var tmp = _path + ".tmp";
+        File.WriteAllText(tmp, json);
+        File.Move(tmp, _path, overwrite: true);
+    }
+
     public NoteAddResult AddAndSave(QueryResult r, DateTimeOffset now)
     {
-        var d = LoadEnsured();
+        var d = LoadStrict(); // #322：讀失敗擲出、不以空結構寫回
         var res = AddTo(d, NoteEntry.From(r, now));
         if (res == NoteAddResult.Added)
         {
@@ -129,7 +172,7 @@ public sealed class NotesStore
     /// </summary>
     public NoteAddResult AddToNamedFolderAndSave(QueryResult r, string? folderName, string? colorHex, DateTimeOffset now)
     {
-        var d = LoadEnsured();
+        var d = LoadStrict(); // #322：讀失敗擲出、不以空結構寫回
         var entry = NoteEntry.From(r, now) with { Color = colorHex ?? "" };
         var res = string.IsNullOrWhiteSpace(folderName)
             ? AddTo(d, entry) // 空名＝預設夾（第一個頂層）
@@ -145,20 +188,34 @@ public sealed class NotesStore
     /// 加入至**指定 Id 之資料夾（含子夾）**並套底色（spec#14／#309 匯入清單：目標＝筆記頁目前選取之夾，可為任意層）：
     /// 跨全樹去重（同 <see cref="AddAndSave"/> 語意）、加入即存檔（一字一存，批次中途取消已加者保留）。
     /// <paramref name="folderId"/> 找不到（例如匯入途中該夾被刪）則退回第一個頂層夾，不丟失該字。
-    /// <paramref name="insertAt"/>：插入索引（批次內保清單序、整批置頂＝第 k 個成功者插在 k；null＝頂端）。
+    /// <paramref name="insertAt"/>：插入索引（null＝頂端）；<paramref name="batchKeys"/> 非 null 時（#322 匯入）改插在本批寫入最晚且仍在夾內者之後（見 <see cref="BatchInsertIndex"/>），<paramref name="insertAt"/> 不用。
     /// 存檔失敗**擲出**（不同於 <see cref="Save"/> 之靜默降級）——匯入結果表不得把未落地之字計已加入。回 <see cref="NoteAddResult"/>。
     /// </summary>
-    public NoteAddResult AddToFolderAndSave(QueryResult r, string folderId, string? colorHex, DateTimeOffset now, int? insertAt = null)
+    public NoteAddResult AddToFolderAndSave(QueryResult r, string folderId, string? colorHex, DateTimeOffset now, int? insertAt = null, IReadOnlyList<string>? batchKeys = null)
     {
-        var d = LoadEnsured();
+        var d = LoadStrict(); // #322：讀失敗擲出、不以空結構寫回
         var entry = NoteEntry.From(r, now) with { Color = colorHex ?? "" };
         var folder = FindFolder(d, folderId) ?? d.Folders[0];
         if (string.IsNullOrEmpty(entry.Key)) { return NoteAddResult.Empty; }
         if (Contains(d, entry.Key)) { return NoteAddResult.AlreadyExists; }
-        var idx = Math.Clamp(insertAt ?? 0, 0, folder.Entries.Count);
+        var idx = batchKeys is null ? Math.Clamp(insertAt ?? 0, 0, folder.Entries.Count) : BatchInsertIndex(folder, batchKeys);
         folder.Entries.Insert(idx, entry);
         if (!TrySave(d, out var err)) { throw new IOException("筆記存檔失敗：" + err); }
         return NoteAddResult.Added;
+    }
+
+    /// <summary>
+    /// 批次相連之插入位置（#322）：本批已加入之字（<paramref name="batchKeys"/> 依寫入順序）中、仍在 <paramref name="folder"/> 內且寫入順序最晚者之後；
+    /// 全不在（本批第一字，或已全被刪除或移走）則置頂。匯入期間使用者在同一夾加字或拖動其他卡，本批後續之字仍接續在本批之後。
+    /// </summary>
+    public static int BatchInsertIndex(NoteFolder folder, IReadOnlyList<string> batchKeys)
+    {
+        for (var k = batchKeys.Count - 1; k >= 0; k--)
+        {
+            var i = folder.Entries.FindIndex(e => e.Key == batchKeys[k]);
+            if (i >= 0) { return i + 1; }
+        }
+        return 0;
     }
 
     /// <summary>存檔並回報成敗（供須偵知寫入失敗之路徑，spec#14）；<see cref="Save"/> 之靜默降級版本仍供既有路徑使用。</summary>
@@ -166,8 +223,7 @@ public sealed class NotesStore
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path, JsonSerializer.Serialize(d, Opts));
+            WriteAtomic(JsonSerializer.Serialize(d, Opts));
             SaveCount++;
             error = "";
             return true;
@@ -201,7 +257,7 @@ public sealed class NotesStore
     {
         var key = NoteEntry.KeyOf(r.Original);
         if (string.IsNullOrEmpty(key)) { return false; }
-        var d = LoadEnsured();
+        var d = LoadStrict(); // #322
         foreach (var f in AllFolders(d))
         {
             var i = f.Entries.FindIndex(e => e.Key == key);
@@ -217,14 +273,14 @@ public sealed class NotesStore
 
     /// <summary>
     /// 自備中譯之批次寫入（spec#14／#321）：**一次載入、一次存檔**——語意逐字同 <see cref="AddToFolderAndSave"/>（跨全樹去重、底色、
-    /// 目標夾不在退回第一個頂層夾、第 k 個加入者插在 <paramref name="insertAt"/>＋k）＋已在筆記者以自備中譯更新
+    /// 目標夾不在退回第一個頂層夾、插入位置同 <see cref="AddToFolderAndSave"/>（有 batchKeys 時接在本批寫入最晚者之後，否則第 k 個加入者插在 insertAt＋k））＋已在筆記者以自備中譯更新
     /// （只換中譯、保留音標／Id／底色／練習分數——與 <see cref="RefreshEntryByKeyAndSave"/> 之全欄刷新不同）。存檔失敗擲出 <see cref="IOException"/>、筆記檔不變（整批未落地）。
     /// </summary>
-    public IReadOnlyList<OwnTranslationWriteResult> AddOrRefreshOwnTranslationsAndSave(IReadOnlyList<QueryResult> results, string folderId, string? colorHex, DateTimeOffset now, int insertAt)
+    public IReadOnlyList<OwnTranslationWriteResult> AddOrRefreshOwnTranslationsAndSave(IReadOnlyList<QueryResult> results, string folderId, string? colorHex, DateTimeOffset now, int insertAt, IReadOnlyList<string>? batchKeys = null)
     {
-        var d = LoadEnsured();
+        var d = LoadStrict(); // #322：讀失敗擲出、不以空結構寫回
         var folder = FindFolder(d, folderId) ?? d.Folders[0];
-        var idx = Math.Clamp(insertAt, 0, folder.Entries.Count);
+        var idx = batchKeys is null ? Math.Clamp(insertAt, 0, folder.Entries.Count) : BatchInsertIndex(folder, batchKeys);
         var outcome = new List<OwnTranslationWriteResult>();
         foreach (var r in results)
         {
@@ -252,7 +308,7 @@ public sealed class NotesStore
     /// </summary>
     public (int Added, int Skipped) AddManyRawToNamedFolderAndSave(IEnumerable<string> originals, string? folderName, string? colorHex, DateTimeOffset now)
     {
-        var d = LoadEnsured();
+        var d = LoadStrict(); // #322：讀失敗擲出、不以空結構寫回
         var folder = EnsureTopFolderByName(d, string.IsNullOrWhiteSpace(folderName) ? DefaultFolderName : folderName!);
         int added = 0, skipped = 0;
         foreach (var raw in originals)
