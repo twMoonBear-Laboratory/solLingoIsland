@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="820" height="500" viewBox="0 0 820 500" font-family="Segoe UI, Microsoft JhengHei, PingFang TC, system-ui, sans-serif">
-  <!-- [modHmi筆記匯入確認頁]：NotesImportWindow（Title「匯入清單」、約 780×460、ShowDialog、Owner＝主視窗、CenterOwner）。spec#14／#309；#320 多檔：來源欄、首行列檔數、未納入行；#321 csv 第二欄自備中譯：中譯來源欄、整批「也改查線上」、費用與主鈕依線上查詢數。設計期參考稿、以文字為準。 -->
+  <!-- [modHmi筆記匯入確認頁]：NotesImportWindow（Title「匯入清單」、有自備中譯時約 800×460（無則 640×460、無中譯來源欄與切換）、ShowDialog、Owner＝主視窗、CenterOwner）。spec#14／#309；#320 多檔：來源欄、首行列檔數、未納入行；#321 csv 第二欄自備中譯：中譯來源欄、整批「也改查線上」、費用與主鈕依線上查詢數。設計期參考稿、以文字為準。 -->
   <rect width="820" height="500" fill="#FFF0F5"/>
 
   <!-- owner 視窗（模態期間不可操作，以淡化示意）：主視窗『筆記』分頁 -->
@@ -18,7 +18,7 @@
   </g>
   <rect x="0" y="0" width="820" height="500" fill="#000000" opacity="0.10"/>
 
-  <!-- 模態對話視窗（CenterOwner）：780×460（示意縮放 760×440） -->
+  <!-- 模態對話視窗（CenterOwner）：800×460（示意縮放 760×440） -->
   <rect x="30" y="30" width="760" height="440" rx="10" fill="#FFFFFF" stroke="#D98FAE" stroke-width="1.5"/>
   <rect x="30" y="30" width="760" height="28" rx="10" fill="#F4C2D0"/>
   <text x="44" y="49" font-size="13" font-weight="600" fill="#5C3346">匯入清單</text>
@@ -59,7 +59,7 @@
   <text x="94" y="216" font-size="12" fill="#777">banana</text>
   <text x="250" y="216" font-size="11" fill="#8A5A6D">unit1.csv</text>
   <text x="350" y="216" font-size="11" fill="#2F6A8A">自備中譯：香蕉</text>
-  <text x="510" y="216" font-size="11" fill="#A06A20">已在筆記「第一冊生詞」（預設略過；…）</text>
+  <text x="510" y="216" font-size="11" fill="#A06A20">已在筆記「第一冊生詞」（勾選＝以自備中譯更新）</text>
   <!-- 列 3：新字、第二欄空白→線上查詢 -->
   <rect x="56" y="235" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
   <text x="58" y="245" font-size="10" fill="#FFFFFF">✓</text>
@@ -67,18 +67,18 @@
   <text x="250" y="246" font-size="11" fill="#8A5A6D">unit1.csv</text>
   <text x="350" y="246" font-size="11" fill="#8A5A6D">線上查詢</text>
   <text x="510" y="246" font-size="11" fill="#4A7A4A">新字</text>
-  <!-- 列 4：跨檔重複（unit2.txt，不勾且停用；中譯來源欄空白） -->
-  <rect x="56" y="265" width="12" height="12" rx="2" fill="#EEEEEE" stroke="#CCCCCC"/>
-  <text x="94" y="276" font-size="12" fill="#AAAAAA">Apple</text>
-  <text x="250" y="276" font-size="11" fill="#8A5A6D">unit2.txt</text>
-  <text x="510" y="276" font-size="11" fill="#A06A20">與「unit1.csv」重複（只留第一筆）</text>
-  <!-- 列 5：新字（片語）、自備中譯（含逗號之引號欄位） -->
-  <rect x="56" y="295" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
-  <text x="58" y="305" font-size="10" fill="#FFFFFF">✓</text>
-  <text x="94" y="306" font-size="12" fill="#333">take it easy</text>
-  <text x="250" y="306" font-size="11" fill="#8A5A6D">unit1.csv</text>
-  <text x="350" y="306" font-size="11" fill="#2F6A8A">自備中譯：放輕鬆, 別緊張</text>
-  <text x="510" y="306" font-size="11" fill="#4A7A4A">新字</text>
+  <!-- 列 4：新字（片語）、自備中譯（含逗號之引號欄位） -->
+  <rect x="56" y="265" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
+  <text x="58" y="275" font-size="10" fill="#FFFFFF">✓</text>
+  <text x="94" y="276" font-size="12" fill="#333">take it easy</text>
+  <text x="250" y="276" font-size="11" fill="#8A5A6D">unit1.csv</text>
+  <text x="350" y="276" font-size="11" fill="#2F6A8A">自備中譯：放輕鬆, 別緊張</text>
+  <text x="510" y="276" font-size="11" fill="#4A7A4A">新字</text>
+  <!-- 列 5：跨檔重複（unit2.txt，不勾且停用；中譯來源欄空白） -->
+  <rect x="56" y="295" width="12" height="12" rx="2" fill="#EEEEEE" stroke="#CCCCCC"/>
+  <text x="94" y="306" font-size="12" fill="#AAAAAA">Apple</text>
+  <text x="250" y="306" font-size="11" fill="#8A5A6D">unit2.txt</text>
+  <text x="510" y="306" font-size="11" fill="#A06A20">與「unit1.csv」重複（只留第一筆）</text>
   <line x1="46" y1="326" x2="774" y2="326" stroke="#F4C2D0"/>
   <text x="94" y="346" font-size="11" fill="#AAA">（可捲動；逐列可改選；來源欄懸停顯示完整路徑；中譯來源欄懸停顯示完整中譯）</text>
 
