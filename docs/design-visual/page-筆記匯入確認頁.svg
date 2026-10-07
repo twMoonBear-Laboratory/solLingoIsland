@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="820" height="500" viewBox="0 0 820 500" font-family="Segoe UI, Microsoft JhengHei, PingFang TC, system-ui, sans-serif">
-  <!-- [modHmi筆記匯入確認頁]：NotesImportWindow（Title「匯入清單」、有自備中譯時約 800×460（無則 640×460、無中譯來源欄與切換）、ShowDialog、Owner＝主視窗、CenterOwner）。spec#14／#309；#320 多檔：來源欄、首行列檔數、未納入行；#321 csv 第二欄自備中譯：中譯來源欄、整批「也改查線上」、費用與主鈕依線上查詢數；#323：「只勾上次失敗字（N）」鈕、上次失敗之列狀態附註。設計期參考稿、以文字為準。 -->
+  <!-- [modHmi筆記匯入確認頁]：NotesImportWindow（Title「匯入清單」、有自備中譯時約 800×460（無則 640×460、無中譯來源欄與切換）、ShowDialog、Owner＝主視窗、CenterOwner）。spec#14／#309；#320 多檔：來源欄、首行列檔數、未納入行；#321 csv 第二欄自備中譯：中譯來源欄、整批「也改查線上」、費用與主鈕依線上查詢數；#323：「只勾上次失敗字（N）」鈕、上次失敗之列狀態前置「上次匯入失敗；」。設計期參考稿、以文字為準。 -->
   <rect width="820" height="500" fill="#FFF0F5"/>
 
   <!-- owner 視窗（模態期間不可操作，以淡化示意）：主視窗『筆記』分頁 -->
@@ -68,7 +68,7 @@
   <text x="94" y="246" font-size="12" fill="#333">cherry</text>
   <text x="250" y="246" font-size="11" fill="#8A5A6D">unit1.csv</text>
   <text x="350" y="246" font-size="11" fill="#8A5A6D">線上查詢</text>
-  <text x="510" y="246" font-size="11" fill="#4A7A4A">新字；上次匯入失敗</text>
+  <text x="510" y="246" font-size="11" fill="#4A7A4A">上次匯入失敗；新字</text>
   <!-- 列 4：新字（片語）、自備中譯（含逗號之引號欄位） -->
   <rect x="56" y="265" width="12" height="12" rx="2" fill="#2F6FED" stroke="#2F6FED"/>
   <text x="58" y="275" font-size="10" fill="#FFFFFF">✓</text>
