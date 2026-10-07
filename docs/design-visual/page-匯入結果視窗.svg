@@ -19,7 +19,7 @@
   <rect x="182" y="108" width="456" height="330" rx="8" fill="#FFFFFF" stroke="#F4C2D0"/>
   <text x="196" y="132" font-size="14" font-weight="600" fill="#B0578D">匯入已取消</text>
   <!-- NotesImportResultText：唯讀、可捲、可選取複製 -->
-  <rect x="196" y="144" width="428" height="236" rx="4" fill="#FFF7FA" stroke="#F4C2D0"/>
+  <rect x="196" y="144" width="428" height="210" rx="4" fill="#FFF7FA" stroke="#F4C2D0"/>
   <text x="206" y="166" font-size="12.5" fill="#3A2C33">匯入已取消：已加入 37 字到「英文課 › Unit 4」</text>
   <text x="206" y="184" font-size="12.5" fill="#3A2C33">（orbit、comet、nebula、galaxy … 等 37 字）、失敗 2 字。</text>
   <text x="206" y="210" font-size="12.5" fill="#3A2C33">失敗（其餘字不受影響；可再匯入一次只勾這幾個）：</text>
@@ -28,7 +28,8 @@
   <text x="206" y="272" font-size="12.5" fill="#3A2C33">（已取消——已加入的字保留，其餘未加入。）</text>
   <rect x="616" y="148" width="5" height="60" rx="2" fill="#E4B7C6"/>
   <!-- #324：撤銷說明（NotesImportResultUndoHint）＋撤銷本次匯入（NotesImportResultUndo，GhostButton；一字未寫入時不顯示） -->
-  <text x="196" y="416" font-size="11" fill="#8A7A82">關閉此視窗或開始下一次匯入後，就不能撤銷了</text>
+  <text x="196" y="372" font-size="11" fill="#8A7A82">下一次匯入開始後，就不能撤銷這次了；關掉此視窗後，</text>
+  <text x="196" y="388" font-size="11" fill="#8A7A82">可從筆記頁「上次匯入結果」再打開</text>
   <rect x="436" y="398" width="102" height="28" rx="6" fill="#FFFFFF" stroke="#B0578D"/>
   <text x="446" y="417" font-size="12.5" fill="#B0578D">撤銷本次匯入</text>
   <!-- 確定（NotesImportResultOk） -->
