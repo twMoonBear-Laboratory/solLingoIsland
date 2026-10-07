@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="500" viewBox="0 0 820 500" font-family="Segoe UI, Microsoft JhengHei, PingFang TC, system-ui, sans-serif">
+  <!-- [modHmi匯入進度列]：主視窗內嵌列（內容區與狀態列之間；未匯入時 Collapsed、不佔位；各分頁皆可見）。spec#14／#322：確認後非模態背景執行——已完成 n／N、目前查詢之字、預估剩餘時間（只計線上查詢）、進度條、取消。設計期參考稿、以文字為準。 -->
+  <rect width="820" height="500" fill="#FFF0F5"/>
+
+  <!-- 主視窗（可照常操作：此例使用者已切到『歷史』分頁） -->
+  <rect x="0" y="0" width="820" height="26" fill="#F4C2D0"/>
+  <text x="10" y="18" font-size="12" font-weight="600" fill="#5C3346">LingoIsland</text>
+  <rect x="0" y="26" width="820" height="52" fill="#FBE4EC"/>
+  <text x="20" y="58" font-size="12" fill="#8A5A6D">主題　擷取　影片　電子書　筆記</text>
+  <rect x="262" y="38" width="44" height="30" rx="8" fill="#F4C2D0"/>
+  <text x="270" y="58" font-size="12" font-weight="600" fill="#5C3346">歷史</text>
+  <text x="314" y="58" font-size="12" fill="#8A5A6D">選項　關於</text>
+
+  <!-- 內容區：任一分頁照常可用 -->
+  <rect x="10" y="88" width="800" height="324" rx="8" fill="#FFFFFF" stroke="#F4C2D0"/>
+  <text x="26" y="114" font-size="13" font-weight="600" fill="#6D3A4D">（任一分頁之內容——匯入期間照常可用）</text>
+  <rect x="26" y="128" width="768" height="40" rx="8" fill="#FFF7FA" stroke="#F4C2D0"/>
+  <text x="40" y="153" font-size="13" fill="#3A2C33">serendipity　/ˌserənˈdɪpəti/　意外發現珍寶的運氣</text>
+  <rect x="26" y="176" width="768" height="40" rx="8" fill="#FFF7FA" stroke="#F4C2D0"/>
+  <text x="40" y="201" font-size="13" fill="#3A2C33">take it for granted　視為理所當然</text>
+
+  <!-- 匯入進度列（AutomationId=NotesImportProgress） -->
+  <rect x="0" y="420" width="820" height="44" fill="#FBE4EC"/>
+  <rect x="0" y="420" width="820" height="1" fill="#F4C2D0"/>
+  <text x="12" y="447" font-size="12.5" fill="#3A2C33">正在匯入到「英文課 › Unit 4」：已完成 37／120（查詢中：photosynthesis）· 約剩 3 分鐘</text>
+  <!-- 進度條（NotesImportProgressBar：0–N、值＝n） -->
+  <rect x="566" y="436" width="160" height="10" rx="5" fill="#FFFFFF" stroke="#E4B7C6"/>
+  <rect x="566" y="436" width="49" height="10" rx="5" fill="#B0578D"/>
+  <!-- 取消（NotesImportProgressCancel：按下即取消、已加入者保留） -->
+  <rect x="738" y="429" width="70" height="26" rx="6" fill="#FFFFFF" fill-opacity="0.4" stroke="#E4B7C6"/>
+  <text x="759" y="447" font-size="12.5" fill="#6D3A4D">取消</text>
+
+  <!-- 狀態列 -->
+  <rect x="0" y="464" width="820" height="36" fill="#FBE4EC"/>
+  <rect x="0" y="464" width="820" height="1" fill="#F4C2D0"/>
+  <text x="12" y="487" font-size="12" fill="#2E7D46">● 已設定 OpenAI 金鑰</text>
+  <text x="170" y="487" font-size="12" fill="#8A5A6D">｜ 喚起：Ctrl+Shift+Q</text>
+
+  <!-- 註記 -->
+  <text x="400" y="240" font-size="11.5" fill="#B0578D" text-anchor="middle">剩餘時間＝最近至多 10 筆線上查詢平均耗時 × 剩餘線上字數（未滿 2 筆顯示「剩餘時間估算中…」；自備中譯字不計）</text>
+  <text x="400" y="260" font-size="11.5" fill="#B0578D" text-anchor="middle">取消中：「正在取消匯入到「…」…（已完成 n／N；已加入的字會保留）」、取消鈕停用</text>
+</svg>
