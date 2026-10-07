@@ -50,7 +50,7 @@ public sealed class QueryService
         var key = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         if (string.IsNullOrWhiteSpace(key))
         {
-            throw new QueryException("未設定 OPENAI_API_KEY 環境變數，無法查詢。請設定使用者環境變數後重新啟動。");
+            throw new QueryException("尚未設定 OPENAI_API_KEY，無法查詢。請到主視窗「選項」分頁設定金鑰（或設定同名環境變數後重新啟動）。");
         }
 
         var dataUrl = "data:image/png;base64," + Convert.ToBase64String(pngBytes);
@@ -68,7 +68,7 @@ public sealed class QueryService
         var key = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         if (string.IsNullOrWhiteSpace(key))
         {
-            throw new QueryException("未設定 OPENAI_API_KEY 環境變數，無法解釋圖片。請設定使用者環境變數後重新啟動。");
+            throw new QueryException("尚未設定 OPENAI_API_KEY，無法解釋圖片。請到主視窗「選項」分頁設定金鑰（或設定同名環境變數後重新啟動）。");
         }
         var dataUrl = "data:image/png;base64," + Convert.ToBase64String(pngBytes);
         var json = await RunWithRetryAsync(c => SendOnceAsync(BuildDescribePayload(dataUrl), key, c), ct);
@@ -85,7 +85,7 @@ public sealed class QueryService
         var key = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         if (string.IsNullOrWhiteSpace(key))
         {
-            throw new QueryException("未設定 OPENAI_API_KEY 環境變數，無法查詢。請設定使用者環境變數後重新啟動。");
+            throw new QueryException("尚未設定 OPENAI_API_KEY，無法查詢。請到主視窗「選項」分頁設定金鑰（或設定同名環境變數後重新啟動）。");
         }
         var json = await RunWithRetryAsync(c => SendOnceAsync(BuildTextPayload(WordPrompt, word), key, c), ct);
         return Parse(json);
@@ -100,7 +100,7 @@ public sealed class QueryService
         var key = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         if (string.IsNullOrWhiteSpace(key))
         {
-            throw new QueryException("未設定 OPENAI_API_KEY 環境變數，無法查詢。請設定使用者環境變數後重新啟動。");
+            throw new QueryException("尚未設定 OPENAI_API_KEY，無法查詢。請到主視窗「選項」分頁設定金鑰（或設定同名環境變數後重新啟動）。");
         }
         var json = await RunWithRetryAsync(c => SendOnceAsync(BuildTextPayload(TextPrompt, english), key, c), ct);
         return Parse(json);
